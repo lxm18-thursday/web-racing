@@ -287,7 +287,8 @@ export class VehicleController {
     const speedNorm = Math.min(1.0, speedKmh / 280);
     const steerFactor = 1.0 / (1.0 + speedNorm * 1.1); // Retains 48% steer authority at 280 km/h for crisp apex carving
     const maxSteerRad = 0.54 * steerFactor;
-    const targetSteerAngle = input.steer * maxSteerRad;
+    // Inverted sign aligns steering with track coordinates: Key A (input.steer < 0) turns left, Key D (input.steer > 0) turns right
+    const targetSteerAngle = -input.steer * maxSteerRad;
 
     // Speed-adaptive steering response rate: fast at low speed, rock-solid at high speed
     const slewRate = 18.0 - speedNorm * 6.0;
@@ -499,7 +500,7 @@ export class VehicleController {
 
     // Cockpit interior steering wheel rotation (aligned with wheel turn direction)
     if (this.model.steeringWheel) {
-      this.model.steeringWheel.rotation.z = -this.currentSteerAngle * 2.8;
+      this.model.steeringWheel.rotation.z = this.currentSteerAngle * 2.8;
     }
 
     // Dynamic brake rotors heat glow simulation

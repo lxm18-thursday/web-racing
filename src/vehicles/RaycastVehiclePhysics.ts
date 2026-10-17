@@ -331,8 +331,8 @@ export class RaycastVehiclePhysics {
     this.chassisBody.velocity.set(0, 0, 0);
     this.chassisBody.angularVelocity.set(0, 0, 0);
 
-    // Place slightly above ground so suspension settles naturally
-    this.chassisBody.position.set(position.x, position.y + 0.5, position.z);
+    // Place at suspension equilibrium height so vehicle is immediately planted without bouncing
+    this.chassisBody.position.set(position.x, position.y + 0.40, position.z);
 
     // Align along track direction
     const rot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), forwardDirection);

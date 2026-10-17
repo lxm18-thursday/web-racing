@@ -125,7 +125,7 @@ export class AISystem {
       const wpIdx = ((cfg.startWpOffset % count) + count) % count;
       const wp = this.waypoints.getWaypoint(wpIdx);
 
-      const spawnPos = wp.position.clone().addScaledVector(wp.binormal, cfg.lateralOffset).add(new THREE.Vector3(0, 0.4, 0));
+      const spawnPos = wp.position.clone().addScaledVector(wp.binormal, cfg.lateralOffset);
       physics.resetTo(spawnPos, wp.tangent);
 
       this.aiCars.push({
@@ -197,7 +197,7 @@ export class AISystem {
 
       // Correct Steering angle calculation: localTarget.x > 0 means turn right (+), localTarget.x < 0 means turn left (-)
       const angle = Math.atan2(localTarget.x, Math.max(0.1, localTarget.z));
-      const steer = Math.max(-1.0, Math.min(1.0, angle * 2.2));
+      const steer = Math.max(-1.0, Math.min(1.0, -angle * 2.2));
 
       // Speed regulation & Corner Braking
       let skill = ai.speedSkillFactor;

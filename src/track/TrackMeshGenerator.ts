@@ -259,9 +259,9 @@ export class TrackMeshGenerator {
           const v1 = i * 7 + col + 1;
           const v2 = (i + 1) * 7 + col;
           const v3 = (i + 1) * 7 + col + 1;
-          // Upward normals CCW
-          colIndices.push(v0, v2, v1);
-          colIndices.push(v1, v2, v3);
+          // Upward normals CCW (points +Y)
+          colIndices.push(v0, v1, v2);
+          colIndices.push(v1, v3, v2);
         }
       }
     }

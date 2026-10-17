@@ -108,7 +108,7 @@ class GameApp {
     // Spawn Player on Starting Grid Row 2 (P3 Left Slot, behind P1)
     const startWp = this.waypoints.getWaypoint(0);
     this.playerVehicle.physics.resetTo(
-      startWp.position.clone().addScaledVector(startWp.binormal, -2.2).add(new THREE.Vector3(0, 0.4, 0)),
+      startWp.position.clone().addScaledVector(startWp.binormal, -2.2),
       startWp.tangent
     );
 
