@@ -52,41 +52,48 @@ export class TrackPhysics {
   }
 
   private createBarrierColliders(): void {
-    const barrierSegments = 280; // High resolution sampling along 2.8km track (every ~10m)
+    const barrierSegments = 300; // High resolution sampling along 2.8km track (~9.7m per segment)
     const totalDist = this.trackData.totalLength;
     const segLen = totalDist / barrierSegments;
     const halfWidth = TrackData.TRACK_WIDTH / 2 + TrackData.CURB_WIDTH + TrackData.RUNOFF_WIDTH; // 14.8m
 
-    // Robust 4-meter thick, 7-meter high barrier boxes with 40% length overlap
-    // Prevents any high-speed car tunneling or jumping over barriers
-    const boxShape = new CANNON.Box(new CANNON.Vec3(2.0, 3.5, segLen * 0.70));
+    // Solid Armco barrier box: 3.0m thick (X=1.5), 7.0m tall (Y=3.5), with 45% segment length overlap
+    const boxShape = new CANNON.Box(new CANNON.Vec3(1.5, 3.5, segLen * 0.725));
 
     for (let i = 0; i < barrierSegments; i++) {
       const t = i / barrierSegments;
       const frame = this.trackData.getFrameAt(t);
 
-      // Left Barrier Box: placed so inner face aligns exactly at 14.8m outer runoff
-      const pLeft = frame.position.clone().addScaledVector(frame.binormal, -halfWidth - 1.8);
+      // Orthonormal rotation basis: X = binormal, Y = normal, Z = tangent
+      const m = new THREE.Matrix4().makeBasis(frame.binormal, frame.normal, frame.tangent);
+      const rot = new THREE.Quaternion().setFromRotationMatrix(m);
+
+      // Left Barrier Box: inner face aligns flush at 14.8m outer runoff
+      const pLeft = frame.position.clone()
+        .addScaledVector(frame.binormal, -halfWidth - 1.5)
+        .addScaledVector(frame.normal, 2.0);
+
       const leftBody = new CANNON.Body({
         mass: 0,
         material: this.physicsWorld.barrierMaterial,
       });
       leftBody.addShape(boxShape);
-      leftBody.position.set(pLeft.x, pLeft.y + 1.5, pLeft.z);
-
-      const rot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), frame.tangent);
+      leftBody.position.set(pLeft.x, pLeft.y, pLeft.z);
       leftBody.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       this.physicsWorld.world.addBody(leftBody);
       this.barrierBodies.push(leftBody);
 
-      // Right Barrier Box: inner face at 14.8m outer runoff
-      const pRight = frame.position.clone().addScaledVector(frame.binormal, halfWidth + 1.8);
+      // Right Barrier Box: inner face aligns flush at 14.8m outer runoff
+      const pRight = frame.position.clone()
+        .addScaledVector(frame.binormal, halfWidth + 1.5)
+        .addScaledVector(frame.normal, 2.0);
+
       const rightBody = new CANNON.Body({
         mass: 0,
         material: this.physicsWorld.barrierMaterial,
       });
       rightBody.addShape(boxShape);
-      rightBody.position.set(pRight.x, pRight.y + 1.5, pRight.z);
+      rightBody.position.set(pRight.x, pRight.y, pRight.z);
       rightBody.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       this.physicsWorld.world.addBody(rightBody);
       this.barrierBodies.push(rightBody);

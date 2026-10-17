@@ -84,12 +84,12 @@ class GameApp {
 
     const playerPhysics = new RaycastVehiclePhysics(this.physicsWorld, {
       mass: 1320,
-      suspensionStiffness: 35,
-      dampingRelaxation: 2.6,
-      dampingCompression: 4.4,
-      frictionSlipFront: 8.5,
-      frictionSlipRear: 9.0,
-      rollInfluence: 0.0,
+      suspensionStiffness: 44,
+      dampingRelaxation: 3.2,
+      dampingCompression: 5.2,
+      frictionSlipFront: 9.5,
+      frictionSlipRear: 10.0,
+      rollInfluence: 0.05,
       downforceFactor: 1.85,
       dragFactor: 0.38,
     });
@@ -105,7 +105,7 @@ class GameApp {
       this.skidMarkManager
     );
 
-    // Spawn Player on Pole Position (Start Line, P1 Left Slot)
+    // Spawn Player on Starting Grid Row 2 (P3 Left Slot, behind P1)
     const startWp = this.waypoints.getWaypoint(0);
     this.playerVehicle.physics.resetTo(
       startWp.position.clone().addScaledVector(startWp.binormal, -2.2).add(new THREE.Vector3(0, 0.4, 0)),

@@ -57,16 +57,21 @@ export class RaycastVehiclePhysics {
       dragFactor: 0.38,
     }
   ) {
-    // 1. Create Chassis Rigid Body with full physical height coverage to guarantee solid collisions
-    const chassisShape = new CANNON.Box(new CANNON.Vec3(0.88, 0.28, 2.05));
+    // 1. Create Chassis Rigid Body with elevated belly clearance to prevent road snagging / launching
+    // Shape A: Main lower hull
+    const chassisHull = new CANNON.Box(new CANNON.Vec3(0.88, 0.20, 1.95));
+    // Shape B: Upper cockpit cabin (guarantees solid collision with overhead gantries & barriers)
+    const chassisCabin = new CANNON.Box(new CANNON.Vec3(0.65, 0.22, 0.90));
+
     this.chassisBody = new CANNON.Body({
       mass: this.config.mass,
       material: this.physicsWorld.chassisMaterial,
       linearDamping: 0.04,
       angularDamping: 0.6,
     });
-    // Elevated shape relative to center of mass for realistic collision volume
-    this.chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.26, 0));
+    // Elevated shape relative to center of mass: bottom is at 0.40 - 0.20 = +0.20m, clear of road trimesh
+    this.chassisBody.addShape(chassisHull, new CANNON.Vec3(0, 0.40, 0));
+    this.chassisBody.addShape(chassisCabin, new CANNON.Vec3(0, 0.74, -0.2));
     this.physicsWorld.world.addBody(this.chassisBody);
 
     // Collision listener for metal thud & sparks
@@ -89,19 +94,19 @@ export class RaycastVehiclePhysics {
       indexForwardAxis: 2,  // Z is forward
     });
 
-    // 3. Configure 4 Wheels
+    // 3. Configure 4 Wheels (Firm GT3 suspension damping prevents bottoming out)
     const wheelRadius = 0.35;
     const commonWheelOptions = {
       radius: wheelRadius,
       directionLocal: new CANNON.Vec3(0, -1, 0),
-      suspensionStiffness: this.config.suspensionStiffness,
-      suspensionRestLength: 0.35,
-      dampingRelaxation: this.config.dampingRelaxation,
-      dampingCompression: this.config.dampingCompression,
-      maxSuspensionForce: 250000,
-      rollInfluence: this.config.rollInfluence,
+      suspensionStiffness: this.config.suspensionStiffness || 44,
+      suspensionRestLength: 0.36,
+      dampingRelaxation: this.config.dampingRelaxation || 3.2,
+      dampingCompression: this.config.dampingCompression || 5.2,
+      maxSuspensionForce: 350000,
+      rollInfluence: 0.05,
       axleLocal: new CANNON.Vec3(-1, 0, 0),
-      maxSuspensionTravel: 0.22,
+      maxSuspensionTravel: 0.18,
       useCustomSlidingRotationalSpeed: false,
     };
 
@@ -109,28 +114,28 @@ export class RaycastVehiclePhysics {
     this.vehicle.addWheel({
       ...commonWheelOptions,
       chassisConnectionPointLocal: new CANNON.Vec3(-0.92, 0.25, 1.35),
-      frictionSlip: this.config.frictionSlipFront,
+      frictionSlip: this.config.frictionSlipFront || 9.5,
     });
 
     // Front-Right (1)
     this.vehicle.addWheel({
       ...commonWheelOptions,
       chassisConnectionPointLocal: new CANNON.Vec3(0.92, 0.25, 1.35),
-      frictionSlip: this.config.frictionSlipFront,
+      frictionSlip: this.config.frictionSlipFront || 9.5,
     });
 
     // Rear-Left (2)
     this.vehicle.addWheel({
       ...commonWheelOptions,
       chassisConnectionPointLocal: new CANNON.Vec3(-0.95, 0.25, -1.35),
-      frictionSlip: this.config.frictionSlipRear,
+      frictionSlip: this.config.frictionSlipRear || 10.0,
     });
 
     // Rear-Right (3)
     this.vehicle.addWheel({
       ...commonWheelOptions,
       chassisConnectionPointLocal: new CANNON.Vec3(0.95, 0.25, -1.35),
-      frictionSlip: this.config.frictionSlipRear,
+      frictionSlip: this.config.frictionSlipRear || 10.0,
     });
 
     this.vehicle.addToWorld(this.physicsWorld.world);
@@ -266,8 +271,8 @@ export class RaycastVehiclePhysics {
       this.chassisBody.applyForce(rollingDrag);
     }
 
-    // 5. Perimeter Boundary Safety Fence:
-    // If vehicle ever breaches 17.5m lateral offset from track, forcefully reflect inwards
+    // 5. Impenetrable Boundary Safety Containment & Fall-Through Prevention:
+    // Outer guardrail sits at 14.8m from centerline. Prevent any barrier tunneling or falling off elevated track.
     if (waypoints) {
       const cp = this.chassisBody.position;
       const chassisPos = new THREE.Vector3(cp.x, cp.y, cp.z);
@@ -275,12 +280,33 @@ export class RaycastVehiclePhysics {
       const refWp = waypoints.getWaypoint(cIdx);
       const toChassis = chassisPos.clone().sub(refWp.position);
       const latSigned = toChassis.dot(refWp.binormal);
-      if (Math.abs(latSigned) > 17.0) {
-        const inwardDir = refWp.binormal.clone().multiplyScalar(latSigned > 0 ? -1 : 1);
-        const bounceForce = new CANNON.Vec3(inwardDir.x, inwardDir.y, inwardDir.z).scale(35000);
-        this.chassisBody.applyForce(bounceForce);
-        // Damp outward velocity
-        this.chassisBody.velocity.scale(0.85, this.chassisBody.velocity);
+      const absLat = Math.abs(latSigned);
+
+      // A. Lateral guardrail containment: reflect outward velocity and clamp
+      if (absLat > 14.85) {
+        const binormalVec = new CANNON.Vec3(refWp.binormal.x, 0, refWp.binormal.z);
+        const latVel = this.chassisBody.velocity.dot(binormalVec);
+        // If moving outward towards or beyond barrier, rebound inward
+        if ((latSigned > 0 && latVel > 0) || (latSigned < 0 && latVel < 0)) {
+          const reflectImpulse = binormalVec.scale(-latVel * 1.35 * this.chassisBody.mass);
+          this.chassisBody.applyImpulse(reflectImpulse);
+        }
+
+        // Hard clamp position so chassis never pierces through guardrail
+        if (absLat > 15.1) {
+          const clampedPos = refWp.position.clone().addScaledVector(refWp.binormal, (latSigned > 0 ? 1 : -1) * 14.9);
+          this.chassisBody.position.x = clampedPos.x;
+          this.chassisBody.position.z = clampedPos.z;
+        }
+      }
+
+      // B. Elevation Safety (prevents dropping through elevated sections of track into the void)
+      const expectedY = refWp.position.y;
+      if (this.chassisBody.position.y < expectedY - 0.4) {
+        this.chassisBody.position.y = expectedY + 0.35;
+        if (this.chassisBody.velocity.y < 0) {
+          this.chassisBody.velocity.y = 0;
+        }
       }
     }
 

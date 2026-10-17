@@ -41,27 +41,35 @@ export class PhysicsWorld {
     const chassisGroundContact = new CANNON.ContactMaterial(this.chassisMaterial, this.groundMaterial, {
       friction: 0.05,
       restitution: 0.05,
+      contactEquationStiffness: 2e7,
+      contactEquationRelaxation: 3,
     });
     this.world.addContactMaterial(chassisGroundContact);
 
-    // Chassis to Barrier contact material (low friction slide, lively bounce preventing sticking)
+    // Chassis to Barrier contact material (impenetrable stiffness, energetic rebound)
     const chassisBarrierContact = new CANNON.ContactMaterial(this.chassisMaterial, this.barrierMaterial, {
-      friction: 0.08,
-      restitution: 0.35,
+      friction: 0.06,
+      restitution: 0.25,
+      contactEquationStiffness: 5e7,
+      contactEquationRelaxation: 2,
     });
     this.world.addContactMaterial(chassisBarrierContact);
 
     // Chassis to Chassis vehicle collision (realistic kinetic impact and rebound)
     const chassisChassisContact = new CANNON.ContactMaterial(this.chassisMaterial, this.chassisMaterial, {
       friction: 0.20,
-      restitution: 0.40,
+      restitution: 0.35,
+      contactEquationStiffness: 3e7,
+      contactEquationRelaxation: 2,
     });
     this.world.addContactMaterial(chassisChassisContact);
 
     // Wheel to Barrier
     const wheelBarrierContact = new CANNON.ContactMaterial(this.wheelMaterial, this.barrierMaterial, {
-      friction: 0.20,
-      restitution: 0.25,
+      friction: 0.15,
+      restitution: 0.20,
+      contactEquationStiffness: 4e7,
+      contactEquationRelaxation: 2,
     });
     this.world.addContactMaterial(wheelBarrierContact);
   }
@@ -69,7 +77,7 @@ export class PhysicsWorld {
   public step(dt: number): void {
     // Sub-stepping for maximum vehicle physics stability at high speeds
     const fixedTimeStep = 1 / 60;
-    const maxSubSteps = 3;
+    const maxSubSteps = 5;
     this.world.step(fixedTimeStep, Math.min(dt, 0.1), maxSubSteps);
   }
 }

@@ -1105,16 +1105,27 @@ export class HUD {
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(mapX(startPos.x) - 3, mapY(startPos.z) - 3, 6, 6);
 
-    // Draw AI cars (Colored circles)
+    // Draw AI cars (Colored circles with team liveries)
+    const aiColorMap: Record<string, string> = {
+      '77': '#ef4444', // Apex Raptor - Red
+      '12': '#3b82f6', // Cobalt Ghost - Blue
+      '33': '#f59e0b', // Viper Strike - Orange
+      '88': '#10b981', // Neon Phantom - Green
+      '99': '#a855f7', // Titan Storm - Purple
+    };
+
     for (const ai of aiCars) {
       const chassisPos = ai.physics.chassisBody.position;
       const ax = mapX(chassisPos.x);
       const ay = mapY(chassisPos.z);
 
-      ctx.fillStyle = ai.number === '77' ? '#ff3333' : (ai.number === '12' ? '#3388ff' : '#ffaa00');
+      ctx.fillStyle = aiColorMap[ai.number] || '#ffffff';
       ctx.beginPath();
-      ctx.arc(ax, ay, 3.5, 0, Math.PI * 2);
+      ctx.arc(ax, ay, 4.0, 0, Math.PI * 2);
       ctx.fill();
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 1;
+      ctx.stroke();
     }
 
     // Draw Player Car (Cyan arrowhead with heading direction)

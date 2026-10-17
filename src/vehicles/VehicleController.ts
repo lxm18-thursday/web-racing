@@ -264,12 +264,14 @@ export class VehicleController {
     }
 
     // 6. Braking System (60% Front, 40% Rear bias)
-    const maxBrakeForce = 6500;
-    let frontBrake = activeBrake * maxBrakeForce * 0.6;
-    let rearBrake = activeBrake * maxBrakeForce * 0.4;
+    // Cannon-es RaycastVehicle setBrake expects impulse per step (N*s).
+    // Maximum racing deceleration ~1.4g (18,000 N total -> ~75 N*s per wheel at 60Hz)
+    const maxBrakeImpulse = 120;
+    let frontBrake = activeBrake * maxBrakeImpulse * 0.6;
+    let rearBrake = activeBrake * maxBrakeImpulse * 0.4;
 
     if (input.handbrake) {
-      rearBrake = maxBrakeForce * 1.5; // Handbrake locks rear wheels for drifting
+      rearBrake = maxBrakeImpulse * 1.8; // Handbrake locks rear wheels for drifting
     }
 
     this.physics.vehicle.setBrake(frontBrake, 0);
@@ -280,15 +282,15 @@ export class VehicleController {
     // Dynamic brake lights
     this.model.setBrakeState(activeBrake > 0.05 || input.handbrake);
 
-    // 7. Corrected Progressive Speed-Sensitive Steering
-    // Inverted sign aligns steering with screen perspective (KeyA = turn screen left, KeyD = turn screen right)
-    const speedNorm = Math.min(1.0, speedKmh / 300);
-    const steerFactor = 1.0 / (1.0 + speedNorm * speedNorm * 5.6);
+    // 7. Progressive Speed-Sensitive Steering
+    // In our coordinate system: Key A (input.steer < 0) turns left, Key D (input.steer > 0) turns right.
+    const speedNorm = Math.min(1.0, speedKmh / 280);
+    const steerFactor = 1.0 / (1.0 + speedNorm * 1.1); // Retains 48% steer authority at 280 km/h for crisp apex carving
     const maxSteerRad = 0.54 * steerFactor;
-    const targetSteerAngle = -input.steer * maxSteerRad;
+    const targetSteerAngle = input.steer * maxSteerRad;
 
-    // Speed-adaptive steering response rate: fast at low speed, gentle and stable at high speed
-    const slewRate = 14.0 - speedNorm * 5.5;
+    // Speed-adaptive steering response rate: fast at low speed, rock-solid at high speed
+    const slewRate = 18.0 - speedNorm * 6.0;
     this.currentSteerAngle += (targetSteerAngle - this.currentSteerAngle) * Math.min(1.0, dt * slewRate);
     this.physics.vehicle.setSteeringValue(this.currentSteerAngle, 0);
     this.physics.vehicle.setSteeringValue(this.currentSteerAngle, 1);
@@ -483,15 +485,21 @@ export class VehicleController {
       const t = wheelInfo.worldTransform;
 
       steerGroup.position.set(t.position.x, t.position.y, t.position.z);
-      steerGroup.quaternion.set(t.quaternion.x, t.quaternion.y, t.quaternion.z, t.quaternion.w);
 
-      // Inner axle spin
+      // Separate steering yaw from axle spin:
+      // steerGroup handles chassis orientation + steering angle
+      // hubGroup handles axle spin around X axis (prevents caliper from spinning!)
+      const steerQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), wheelInfo.steering);
+      const wheelChassisQuat = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+      steerGroup.quaternion.copy(wheelChassisQuat).multiply(steerQuat);
+
+      // Inner axle spin (spins tire, rim and brake disc, not the caliper)
       hubGroup.rotation.x = this.wheelSpinAngle;
     }
 
     // Cockpit interior steering wheel rotation (aligned with wheel turn direction)
     if (this.model.steeringWheel) {
-      this.model.steeringWheel.rotation.z = this.currentSteerAngle * 2.8;
+      this.model.steeringWheel.rotation.z = -this.currentSteerAngle * 2.8;
     }
 
     // Dynamic brake rotors heat glow simulation
@@ -583,7 +591,7 @@ export class VehicleController {
       gForceLong: this.gForceLong,
       boostLevel: this.boostLevel,
       isBoosting: this.isBoosting,
-      isBraking: this.physics.vehicle.wheelInfos[0].brake > 50,
+      isBraking: this.physics.vehicle.wheelInfos[0].brake > 10,
       slipRatio: this.physics.maxSlip,
       onCurb: this.physics.onCurb,
       lapNumber: this.lapNumber,

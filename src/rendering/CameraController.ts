@@ -20,7 +20,7 @@ export class CameraController {
   private prevMode: CameraViewMode = 'chase';
 
   constructor(aspectRatio: number) {
-    this.camera = new THREE.PerspectiveCamera(this.BASE_FOV, aspectRatio, 0.05, 3000);
+    this.camera = new THREE.PerspectiveCamera(this.BASE_FOV, aspectRatio, 0.02, 3000);
   }
 
   public cycleMode(): CameraViewMode {
@@ -99,9 +99,12 @@ export class CameraController {
         .add(new THREE.Vector3(0, 2.3, 0))
         .add(shakeOffset);
 
-      // Aim target: 12m ahead of car
+      // Prevent chase camera from clipping into ground/road surface
+      desiredPos.y = Math.max(vehiclePos.y + 0.95, desiredPos.y);
+
+      // Aim target: 14m ahead of car
       const desiredLook = vehiclePos.clone()
-        .addScaledVector(flatForward, 12.0)
+        .addScaledVector(flatForward, 14.0)
         .add(new THREE.Vector3(0, 1.1, 0));
 
       if (!this.isInitialized || this.prevMode !== 'chase') {
@@ -115,14 +118,15 @@ export class CameraController {
         this.currentLookTarget.lerp(desiredLook, lagFactor * 1.5);
       }
 
+      this.currentCamPos.y = Math.max(vehiclePos.y + 0.90, this.currentCamPos.y);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentLookTarget);
 
     } else if (this.currentMode === 'hood') {
-      // Front bonnet / roof camera overlooking hood and road ahead
+      // Front bonnet / nose cone camera overlooking road ahead
       const hoodPos = vehiclePos.clone()
-        .addScaledVector(forward, 0.42)
-        .addScaledVector(up, 1.12)
+        .addScaledVector(forward, 0.45)
+        .addScaledVector(up, 1.05)
         .add(shakeOffset);
 
       const hoodLook = vehiclePos.clone()
@@ -134,18 +138,19 @@ export class CameraController {
       this.prevMode = 'hood';
 
     } else if (this.currentMode === 'cockpit') {
-      // Driver cockpit seat at visor eye level overlooking steering wheel
+      // Driver cockpit seat at visor eye level overlooking steering wheel and OLED screen
+      // Avoids clipping with the roof canopy mesh
       const gTilt = Math.max(-0.06, Math.min(0.06, gForceLat * 0.025));
       const cockpitPos = vehiclePos.clone()
         .addScaledVector(right, -0.32)
-        .addScaledVector(forward, -0.02)
-        .addScaledVector(up, 0.88)
+        .addScaledVector(forward, 0.06)
+        .addScaledVector(up, 0.74)
         .add(shakeOffset);
 
       const cockpitLook = vehiclePos.clone()
         .addScaledVector(right, -0.32 + gTilt * 2.0)
         .addScaledVector(forward, 40.0)
-        .addScaledVector(up, 0.85);
+        .addScaledVector(up, 0.72);
 
       this.camera.position.copy(cockpitPos);
       this.camera.lookAt(cockpitLook);
@@ -158,6 +163,8 @@ export class CameraController {
         .addScaledVector(flatForward, -22.0)
         .addScaledVector(rightVec, 10.0)
         .add(new THREE.Vector3(0, 24.0, 0));
+
+      dronePos.y = Math.max(vehiclePos.y + 8.0, dronePos.y);
 
       const droneLook = vehiclePos.clone().addScaledVector(flatForward, 8.0);
 
@@ -172,6 +179,7 @@ export class CameraController {
         this.currentLookTarget.lerp(droneLook, lagFactor * 2.5);
       }
 
+      this.currentCamPos.y = Math.max(vehiclePos.y + 8.0, this.currentCamPos.y);
       this.camera.position.copy(this.currentCamPos);
       this.camera.lookAt(this.currentLookTarget);
     }

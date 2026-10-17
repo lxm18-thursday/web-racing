@@ -15,14 +15,16 @@ export interface AICarInstance {
   currentWaypointIdx: number;
   lateralOffset: number; // Current Lane offset in meters
   targetLateralOffset: number; // Target Lane offset in meters
-  speedSkillFactor: number; // 0.85 to 1.05
+  speedSkillFactor: number; // 0.90 to 1.05
   laneChangeCooldown: number;
+  stuckTimer: number;
 }
 
 /**
- * AI Opponent Racing Subsystem.
- * Manages 3 distinct AI competitors with procedural liveries, waypoint navigation,
- * PID steering, corner braking, and dynamic overtaking behavior.
+ * High-Performance AI Opponent Racing Subsystem.
+ * Manages 5 distinct, competitive AI racers positioned on the starting grid,
+ * featuring realistic path navigation, pack racing, slipstream overtaking,
+ * and intelligent collision avoidance.
  */
 export class AISystem {
   public aiCars: AICarInstance[] = [];
@@ -36,36 +38,60 @@ export class AISystem {
   }
 
   private spawnAICars(): void {
+    // 5 Opponents arranged in authentic staggered Grand Prix starting grid:
+    // Row 1: P1 (Ahead Left) & P2 (Ahead Right)
+    // Row 2: Player (P3 Left) & P4 (Row 2 Right)
+    // Row 3: P5 (Row 3 Left) & P6 (Row 3 Right)
     const aiConfigs = [
       {
         name: 'Apex Raptor',
         number: '77',
-        bodyColor: 0xd91414,  // Crimson Red
-        accentColor: 0xffffff,
+        bodyColor: 0xd91414,  // Scuderia Crimson Red
+        accentColor: 0xffd700, // Gold Aero
         caliperColor: 0xffcc00,
-        lateralOffset: 2.4,   // P2 (Right slot, row 1)
-        speedSkill: 0.98,
-        startWpOffset: -2,
+        lateralOffset: -2.4,  // P1: Pole Position (Ahead Left, Row 1)
+        speedSkill: 1.02,
+        startWpOffset: 3,     // 18m ahead of player
       },
       {
         name: 'Cobalt Ghost',
         number: '12',
         bodyColor: 0x0055ff,  // Electric Blue
-        accentColor: 0x44ff88,
+        accentColor: 0x00ffff, // Cyan Neon
         caliperColor: 0xff3300,
-        lateralOffset: -2.4,  // P3 (Left slot, row 2)
-        speedSkill: 0.95,
-        startWpOffset: -4,
+        lateralOffset: 2.4,   // P2: Front Row (Ahead Right, Row 1)
+        speedSkill: 0.99,
+        startWpOffset: 2,     // 12m ahead of player
       },
       {
         name: 'Viper Strike',
         number: '33',
-        bodyColor: 0xffaa00,  // Acid Sunset Yellow
-        accentColor: 0x1a1a1a,
+        bodyColor: 0xff9900,  // Acid Sunset Orange
+        accentColor: 0x111111,
         caliperColor: 0x00ffcc,
-        lateralOffset: 2.4,   // P4 (Right slot, row 2)
-        speedSkill: 0.93,
-        startWpOffset: -6,
+        lateralOffset: 2.4,   // P4: Second Row alongside player (Row 2 Right)
+        speedSkill: 0.96,
+        startWpOffset: -1,    // Alongside / 6m behind
+      },
+      {
+        name: 'Neon Phantom',
+        number: '88',
+        bodyColor: 0x10b981,  // Emerald Mint Green
+        accentColor: 0xffffff,
+        caliperColor: 0xff4444,
+        lateralOffset: -2.4,  // P5: Third Row (Row 3 Left)
+        speedSkill: 0.94,
+        startWpOffset: -3,    // 18m behind
+      },
+      {
+        name: 'Titan Storm',
+        number: '99',
+        bodyColor: 0x4f46e5,  // Deep Indigo / Anthracite
+        accentColor: 0xa855f7, // Purple Accent
+        caliperColor: 0x38bdf8,
+        lateralOffset: 2.4,   // P6: Third Row (Row 3 Right)
+        speedSkill: 0.92,
+        startWpOffset: -4,    // 24m behind
       },
     ];
 
@@ -79,16 +105,16 @@ export class AISystem {
       });
       this.scene.add(model.rootGroup);
 
-      // 2. Physics & Controller
+      // 2. Physics & Controller with elevated chassis to prevent bottoming out
       const physics = new RaycastVehiclePhysics(this.physicsWorld, {
-        mass: 1300,
-        suspensionStiffness: 32,
-        dampingRelaxation: 2.5,
-        dampingCompression: 4.2,
-        frictionSlipFront: 8.5,
-        frictionSlipRear: 9.0,
-        rollInfluence: 0.0,
-        downforceFactor: 1.75,
+        mass: 1320,
+        suspensionStiffness: 44,
+        dampingRelaxation: 3.2,
+        dampingCompression: 5.2,
+        frictionSlipFront: 9.5,
+        frictionSlipRear: 10.0,
+        rollInfluence: 0.05,
+        downforceFactor: 1.85,
         dragFactor: 0.38,
       });
 
@@ -99,7 +125,7 @@ export class AISystem {
       const wpIdx = ((cfg.startWpOffset % count) + count) % count;
       const wp = this.waypoints.getWaypoint(wpIdx);
 
-      const spawnPos = wp.position.clone().addScaledVector(wp.binormal, cfg.lateralOffset);
+      const spawnPos = wp.position.clone().addScaledVector(wp.binormal, cfg.lateralOffset).add(new THREE.Vector3(0, 0.4, 0));
       physics.resetTo(spawnPos, wp.tangent);
 
       this.aiCars.push({
@@ -112,19 +138,20 @@ export class AISystem {
         targetLateralOffset: cfg.lateralOffset,
         speedSkillFactor: cfg.speedSkill,
         laneChangeCooldown: 0,
+        stuckTimer: 0,
       });
     }
   }
 
   /**
-   * Update AI behavior and vehicle physics for each AI car.
+   * Update AI behavior, path navigation, collision avoidance, and vehicle physics.
    */
   public update(dt: number, playerPos: THREE.Vector3, raceActive: boolean = true): void {
     const totalWps = this.waypoints.waypoints.length;
 
     for (const ai of this.aiCars) {
       if (!raceActive) {
-        // Parked on grid waiting for green flag
+        // Parked on starting grid waiting for green flag
         const idleInput: VehicleInput = {
           throttle: 0,
           brake: 1.0,
@@ -141,16 +168,18 @@ export class AISystem {
       }
 
       // Smooth lane transition towards target offset
-      ai.lateralOffset += (ai.targetLateralOffset - ai.lateralOffset) * Math.min(1.0, dt * 2.0);
+      ai.lateralOffset += (ai.targetLateralOffset - ai.lateralOffset) * Math.min(1.0, dt * 3.5);
 
       const cp = ai.physics.chassisBody.position;
       const chassisPos = new THREE.Vector3(cp.x, cp.y, cp.z);
       ai.currentWaypointIdx = this.waypoints.getClosestWaypointIndex(chassisPos, ai.currentWaypointIdx);
 
-      // Look-ahead waypoint target (dynamically scales with speed: 12m at low speed, 28m at high speed)
+      // Speed measurements
       const speedMs = ai.physics.chassisBody.velocity.length();
       const speedKmh = speedMs * 3.6;
-      const lookAheadSteps = Math.floor(4 + (speedKmh / 250) * 10);
+
+      // Look-ahead waypoint target (dynamically scales with speed: 12m at low speed, 30m at high speed)
+      const lookAheadSteps = Math.floor(4 + (speedKmh / 240) * 10);
       const targetWpIdx = (ai.currentWaypointIdx + lookAheadSteps) % totalWps;
       const targetWp = this.waypoints.getWaypoint(targetWpIdx);
 
@@ -163,46 +192,48 @@ export class AISystem {
       // Transform into vehicle local space
       const cq = ai.physics.chassisBody.quaternion;
       const carQuat = new THREE.Quaternion(cq.x, cq.y, cq.z, cq.w);
-      const invQuat = carQuat.invert();
+      const invQuat = carQuat.clone().invert();
       const localTarget = toTarget.clone().applyQuaternion(invQuat);
 
-      // Steering angle calculation (local X / local Z)
+      // Correct Steering angle calculation: localTarget.x > 0 means turn right (+), localTarget.x < 0 means turn left (-)
       const angle = Math.atan2(localTarget.x, Math.max(0.1, localTarget.z));
-      const steer = Math.max(-1.0, Math.min(1.0, -angle * 1.8));
+      const steer = Math.max(-1.0, Math.min(1.0, angle * 2.2));
 
       // Speed regulation & Corner Braking
-      const desiredSpeedKmh = targetWp.targetSpeedKmh * ai.speedSkillFactor;
+      let skill = ai.speedSkillFactor;
+      // Subtle rubber-banding: if AI is trailing player, give slight draft boost
+      const toPlayer = playerPos.clone().sub(chassisPos);
+      const forwardVec = new THREE.Vector3(0, 0, 1).applyQuaternion(carQuat);
+      const fwdToPlayer = toPlayer.dot(forwardVec);
+      if (fwdToPlayer > 18.0) {
+        skill *= 1.06; // Catch-up draft
+      }
+
+      const desiredSpeedKmh = targetWp.targetSpeedKmh * skill;
       let throttle = 0;
       let brake = 0;
 
-      if (speedKmh < desiredSpeedKmh - 5) {
+      if (speedKmh < desiredSpeedKmh - 6) {
         throttle = 1.0;
         brake = 0.0;
-      } else if (speedKmh > desiredSpeedKmh + 5) {
+      } else if (speedKmh > desiredSpeedKmh + 6) {
         throttle = 0.0;
-        brake = Math.min(1.0, (speedKmh - desiredSpeedKmh) / 30);
+        brake = Math.min(0.85, (speedKmh - desiredSpeedKmh) / 25);
       } else {
-        throttle = 0.45;
+        throttle = 0.65;
         brake = 0.0;
       }
 
-      // Avoid getting permanently stuck: if speed is nearly zero for long, give full throttle
-      if (speedKmh < 5) {
-        throttle = 0.9;
-      }
-
-      // Dynamic collision avoidance: detect car directly ahead
-      const forwardVec = new THREE.Vector3(0, 0, 1).applyQuaternion(carQuat);
-      let minAheadDist = Infinity;
+      // Dynamic collision avoidance & slipstream overtaking:
+      // Only avoid if a car is directly in front IN THE SAME LANE
+      let leadCarAhead = false;
+      let leadCarDist = Infinity;
 
       // Check player distance
-      const toPlayer = playerPos.clone().sub(chassisPos);
-      const distToPlayer = toPlayer.length();
-      if (distToPlayer > 0.1 && distToPlayer < 16.0) {
-        const dotP = toPlayer.clone().normalize().dot(forwardVec);
-        if (dotP > 0.65) {
-          minAheadDist = Math.min(minAheadDist, distToPlayer);
-        }
+      const latDistPlayer = Math.abs(toPlayer.dot(targetWp.binormal));
+      if (fwdToPlayer > 0.5 && fwdToPlayer < 9.0 && latDistPlayer < 2.4) {
+        leadCarAhead = true;
+        leadCarDist = Math.min(leadCarDist, fwdToPlayer);
       }
 
       // Check other AI cars
@@ -214,12 +245,12 @@ export class AISystem {
           other.physics.chassisBody.position.z
         );
         const toOther = otherPos.clone().sub(chassisPos);
-        const distToOther = toOther.length();
-        if (distToOther > 0.1 && distToOther < 14.0) {
-          const dotO = toOther.clone().normalize().dot(forwardVec);
-          if (dotO > 0.65) {
-            minAheadDist = Math.min(minAheadDist, distToOther);
-          }
+        const fwdDist = toOther.dot(forwardVec);
+        const latDist = Math.abs(toOther.dot(targetWp.binormal));
+
+        if (fwdDist > 0.5 && fwdDist < 8.0 && latDist < 2.4) {
+          leadCarAhead = true;
+          leadCarDist = Math.min(leadCarDist, fwdDist);
         }
       }
 
@@ -227,22 +258,39 @@ export class AISystem {
         ai.laneChangeCooldown -= dt;
       }
 
-      // Apply collision avoidance
-      if (minAheadDist < 9.0) {
-        // Too close, brake and try overtaking on the other lane if cooldown elapsed
-        throttle = 0.1;
-        brake = 0.7;
-        if (ai.laneChangeCooldown <= 0) {
-          if (ai.targetLateralOffset > 0) {
-            ai.targetLateralOffset = Math.max(-3.2, ai.targetLateralOffset - 2.6);
-          } else {
-            ai.targetLateralOffset = Math.min(3.2, ai.targetLateralOffset + 2.6);
-          }
-          ai.laneChangeCooldown = 4.0; // 4s lane cooldown
+      if (leadCarAhead) {
+        // Modulate pace without coming to an abrupt stop
+        if (leadCarDist < 4.0) {
+          throttle = 0.45;
+          brake = 0.20;
+        } else {
+          throttle = 0.70;
+          brake = 0.0;
         }
-      } else if (minAheadDist < 16.0) {
-        // Approaching, modulate throttle
-        throttle = Math.min(throttle, 0.4);
+
+        // Switch to the open lane to overtake
+        if (ai.laneChangeCooldown <= 0) {
+          ai.targetLateralOffset = ai.lateralOffset > 0 ? -2.4 : 2.4;
+          ai.laneChangeCooldown = 1.6; // Quick 1.6s lane decision
+        }
+      }
+
+      // Anti-stuck rescue: if trapped at low speed during active race, unjam with full throttle
+      if (speedKmh < 4.0) {
+        ai.stuckTimer += dt;
+        throttle = 1.0;
+        brake = 0.0;
+        if (ai.stuckTimer > 2.0) {
+          // Reposition upright on waypoint
+          const currentWp = this.waypoints.getWaypoint(ai.currentWaypointIdx);
+          ai.physics.resetTo(
+            currentWp.position.clone().addScaledVector(currentWp.binormal, ai.lateralOffset),
+            currentWp.tangent
+          );
+          ai.stuckTimer = 0;
+        }
+      } else {
+        ai.stuckTimer = 0;
       }
 
       const input: VehicleInput = {
@@ -250,7 +298,7 @@ export class AISystem {
         brake,
         steer,
         handbrake: false,
-        boost: speedKmh > 120 && targetWp.curvature < 0.0005 && Math.random() < 0.02,
+        boost: speedKmh > 110 && targetWp.curvature < 0.0006 && Math.random() < 0.02,
         shiftUp: false,
         shiftDown: false,
         toggleAuto: false,
