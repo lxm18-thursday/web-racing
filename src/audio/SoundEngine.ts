@@ -406,6 +406,60 @@ export class SoundEngine {
     }
   }
 
+  /**
+   * Visceral crash and impact sound effect:
+   * Synthesizes heavy chassis thud + metallic crumple/scrape.
+   */
+  public triggerCrashSound(impactSpeed: number): void {
+    if (!this.isInitialized || !this.ctx || this.isMuted) return;
+    if (impactSpeed < 2.5) return;
+
+    const now = this.ctx.currentTime;
+    const intensity = Math.min(1.0, Math.max(0.25, (impactSpeed / 35.0)));
+    const duration = 0.22 + intensity * 0.15;
+
+    // 1. Heavy low-frequency body thud (180Hz -> 28Hz)
+    const thudOsc = this.ctx.createOscillator();
+    thudOsc.type = 'triangle';
+    thudOsc.frequency.setValueAtTime(175 * Math.min(1.2, intensity + 0.4), now);
+    thudOsc.frequency.exponentialRampToValueAtTime(28, now + duration);
+
+    const thudGain = this.ctx.createGain();
+    thudGain.gain.setValueAtTime(intensity * 0.9, now);
+    thudGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    thudOsc.connect(thudGain);
+    thudGain.connect(this.masterGain!);
+    thudOsc.start(now);
+    thudOsc.stop(now + duration);
+
+    // 2. Metallic scrape / crunch noise burst
+    const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+    const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.35));
+    }
+
+    const noiseSource = this.ctx.createBufferSource();
+    noiseSource.buffer = buffer;
+
+    const noiseFilter = this.ctx.createBiquadFilter();
+    noiseFilter.type = 'bandpass';
+    noiseFilter.frequency.setValueAtTime(1200 + Math.random() * 400, now);
+    noiseFilter.Q.setValueAtTime(3.5, now);
+
+    const noiseGain = this.ctx.createGain();
+    noiseGain.gain.setValueAtTime(intensity * 0.65, now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+
+    noiseSource.connect(noiseFilter);
+    noiseFilter.connect(noiseGain);
+    noiseGain.connect(this.masterGain!);
+    noiseSource.start(now);
+    noiseSource.stop(now + duration);
+  }
+
   private makeDistortionCurve(amount: number = 20): Float32Array<ArrayBuffer> {
     const k = amount;
     const n_samples = 44100;

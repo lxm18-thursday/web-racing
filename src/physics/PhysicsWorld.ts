@@ -39,22 +39,29 @@ export class PhysicsWorld {
 
     // Chassis to Ground contact material (smooth skidplate, prevents snagging/flipping)
     const chassisGroundContact = new CANNON.ContactMaterial(this.chassisMaterial, this.groundMaterial, {
-      friction: 0.02,
+      friction: 0.05,
       restitution: 0.05,
     });
     this.world.addContactMaterial(chassisGroundContact);
 
-    // Chassis to Barrier contact material (low friction slide, moderate bounce)
+    // Chassis to Barrier contact material (low friction slide, lively bounce preventing sticking)
     const chassisBarrierContact = new CANNON.ContactMaterial(this.chassisMaterial, this.barrierMaterial, {
-      friction: 0.25,
-      restitution: 0.2,
+      friction: 0.08,
+      restitution: 0.35,
     });
     this.world.addContactMaterial(chassisBarrierContact);
 
+    // Chassis to Chassis vehicle collision (realistic kinetic impact and rebound)
+    const chassisChassisContact = new CANNON.ContactMaterial(this.chassisMaterial, this.chassisMaterial, {
+      friction: 0.20,
+      restitution: 0.40,
+    });
+    this.world.addContactMaterial(chassisChassisContact);
+
     // Wheel to Barrier
     const wheelBarrierContact = new CANNON.ContactMaterial(this.wheelMaterial, this.barrierMaterial, {
-      friction: 0.4,
-      restitution: 0.1,
+      friction: 0.20,
+      restitution: 0.25,
     });
     this.world.addContactMaterial(wheelBarrierContact);
   }

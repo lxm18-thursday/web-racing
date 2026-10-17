@@ -44,48 +44,112 @@ export class TrackPhysics {
     this.groundPlaneBody.position.set(0, -0.2, 0);
     this.physicsWorld.world.addBody(this.groundPlaneBody);
 
-    // 3. Segmented Solid Armco Guardrail Colliders
+    // 3. High-Density Segmented Solid Armco Guardrail Colliders (Impenetrable)
     this.createBarrierColliders();
+
+    // 4. Solid Scenery Architecture Colliders (Gantry, Grandstands, Lighting Towers)
+    this.createSceneryColliders();
   }
 
   private createBarrierColliders(): void {
-    const barrierSegments = 120; // 120 barrier segments along the 2.8km track
+    const barrierSegments = 280; // High resolution sampling along 2.8km track (every ~10m)
     const totalDist = this.trackData.totalLength;
     const segLen = totalDist / barrierSegments;
-    const halfWidth = TrackData.TRACK_WIDTH / 2 + TrackData.CURB_WIDTH + TrackData.RUNOFF_WIDTH;
+    const halfWidth = TrackData.TRACK_WIDTH / 2 + TrackData.CURB_WIDTH + TrackData.RUNOFF_WIDTH; // 14.8m
+
+    // Robust 4-meter thick, 7-meter high barrier boxes with 40% length overlap
+    // Prevents any high-speed car tunneling or jumping over barriers
+    const boxShape = new CANNON.Box(new CANNON.Vec3(2.0, 3.5, segLen * 0.70));
 
     for (let i = 0; i < barrierSegments; i++) {
       const t = i / barrierSegments;
       const frame = this.trackData.getFrameAt(t);
 
-      // Left Barrier Box
-      const pLeft = frame.position.clone().addScaledVector(frame.binormal, -halfWidth - 0.4);
+      // Left Barrier Box: placed so inner face aligns exactly at 14.8m outer runoff
+      const pLeft = frame.position.clone().addScaledVector(frame.binormal, -halfWidth - 1.8);
       const leftBody = new CANNON.Body({
         mass: 0,
         material: this.physicsWorld.barrierMaterial,
       });
-      // Box half-extents: width=0.5m, height=1.5m, length=segLen/2 + 0.5m
-      const boxShape = new CANNON.Box(new CANNON.Vec3(0.5, 1.5, segLen * 0.55));
       leftBody.addShape(boxShape);
-      leftBody.position.set(pLeft.x, pLeft.y + 0.75, pLeft.z);
+      leftBody.position.set(pLeft.x, pLeft.y + 1.5, pLeft.z);
 
-      // Align box along tangent
       const rot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), frame.tangent);
       leftBody.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       this.physicsWorld.world.addBody(leftBody);
       this.barrierBodies.push(leftBody);
 
-      // Right Barrier Box
-      const pRight = frame.position.clone().addScaledVector(frame.binormal, halfWidth + 0.4);
+      // Right Barrier Box: inner face at 14.8m outer runoff
+      const pRight = frame.position.clone().addScaledVector(frame.binormal, halfWidth + 1.8);
       const rightBody = new CANNON.Body({
         mass: 0,
         material: this.physicsWorld.barrierMaterial,
       });
       rightBody.addShape(boxShape);
-      rightBody.position.set(pRight.x, pRight.y + 0.75, pRight.z);
+      rightBody.position.set(pRight.x, pRight.y + 1.5, pRight.z);
       rightBody.quaternion.set(rot.x, rot.y, rot.z, rot.w);
       this.physicsWorld.world.addBody(rightBody);
       this.barrierBodies.push(rightBody);
+    }
+  }
+
+  private createSceneryColliders(): void {
+    // 1. Start Gantry Pillars
+    const gantryFrame = this.trackData.getFrameAt(0);
+    const span = TrackData.TRACK_WIDTH + 8;
+    const gantryHeight = 7.5;
+    const pillarShape = new CANNON.Box(new CANNON.Vec3(0.6, gantryHeight / 2, 0.6));
+
+    const leftPillarPos = gantryFrame.position.clone()
+      .addScaledVector(gantryFrame.binormal, -span / 2)
+      .add(new THREE.Vector3(0, gantryHeight / 2, 0));
+    const leftPillarBody = new CANNON.Body({ mass: 0, material: this.physicsWorld.barrierMaterial });
+    leftPillarBody.addShape(pillarShape);
+    leftPillarBody.position.set(leftPillarPos.x, leftPillarPos.y, leftPillarPos.z);
+    this.physicsWorld.world.addBody(leftPillarBody);
+    this.barrierBodies.push(leftPillarBody);
+
+    const rightPillarPos = gantryFrame.position.clone()
+      .addScaledVector(gantryFrame.binormal, span / 2)
+      .add(new THREE.Vector3(0, gantryHeight / 2, 0));
+    const rightPillarBody = new CANNON.Body({ mass: 0, material: this.physicsWorld.barrierMaterial });
+    rightPillarBody.addShape(pillarShape);
+    rightPillarBody.position.set(rightPillarPos.x, rightPillarPos.y, rightPillarPos.z);
+    this.physicsWorld.world.addBody(rightPillarBody);
+    this.barrierBodies.push(rightPillarBody);
+
+    // 2. Grandstand Solid Base Colliders
+    const standTVals = [0.03, 0.07, 0.11];
+    const standShape = new CANNON.Box(new CANNON.Vec3(13.0, 4.5, 9.0));
+    for (const t of standTVals) {
+      const frame = this.trackData.getFrameAt(t);
+      const standPos = frame.position.clone()
+        .addScaledVector(frame.binormal, 25)
+        .add(new THREE.Vector3(0, 4.5, 0));
+
+      const standBody = new CANNON.Body({ mass: 0, material: this.physicsWorld.barrierMaterial });
+      standBody.addShape(standShape);
+      standBody.position.set(standPos.x, standPos.y, standPos.z);
+      const standRot = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, -1), frame.binormal.clone().negate());
+      standBody.quaternion.set(standRot.x, standRot.y, standRot.z, standRot.w);
+      this.physicsWorld.world.addBody(standBody);
+      this.barrierBodies.push(standBody);
+    }
+
+    // 3. Floodlight Towers (12 towers)
+    const towerShape = new CANNON.Box(new CANNON.Vec3(1.2, 9.0, 1.2));
+    for (let i = 0; i < 12; i++) {
+      const t = i / 12;
+      const frame = this.trackData.getFrameAt(t);
+      const towerPos = frame.position.clone()
+        .addScaledVector(frame.binormal, 22)
+        .add(new THREE.Vector3(0, 9.0, 0));
+
+      const towerBody = new CANNON.Body({ mass: 0, material: this.physicsWorld.barrierMaterial });
+      towerBody.addShape(towerShape);
+      towerBody.position.set(towerPos.x, towerPos.y, towerPos.z);
+      this.physicsWorld.world.addBody(towerBody);
+      this.barrierBodies.push(towerBody);
     }
   }
 }

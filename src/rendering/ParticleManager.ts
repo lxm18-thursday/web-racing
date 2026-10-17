@@ -7,7 +7,7 @@ interface Particle {
   maxLife: number;
   baseScale: number;
   rotationSpeed: number;
-  type: 'smoke' | 'flame' | 'dust_grass' | 'dust_gravel';
+  type: 'smoke' | 'flame' | 'dust_grass' | 'dust_gravel' | 'spark';
 }
 
 /**
@@ -194,6 +194,46 @@ export class ParticleManager {
   }
 
   /**
+   * Spawn bright glowing golden sparks on collision impact or barrier scrape.
+   */
+  public emitSparks(position: THREE.Vector3, velocityDir: THREE.Vector3, count: number = 8): void {
+    if (this.particles.length >= this.MAX_PARTICLES) return;
+
+    for (let i = 0; i < count; i++) {
+      const mat = new THREE.MeshBasicMaterial({
+        color: Math.random() > 0.3 ? 0xffcc22 : 0xff7700,
+        transparent: true,
+        opacity: 1.0,
+        depthWrite: false,
+      });
+      const mesh = new THREE.Mesh(this.flameGeo, mat);
+      mesh.position.copy(position).add(new THREE.Vector3(
+        (Math.random() - 0.5) * 0.1,
+        (Math.random() - 0.5) * 0.1,
+        (Math.random() - 0.5) * 0.1
+      ));
+
+      const sparkVel = velocityDir.clone().multiplyScalar(3.0 + Math.random() * 6.0)
+        .add(new THREE.Vector3(
+          (Math.random() - 0.5) * 5.0,
+          1.5 + Math.random() * 3.5,
+          (Math.random() - 0.5) * 5.0
+        ));
+
+      this.particleGroup.add(mesh);
+      this.particles.push({
+        mesh,
+        velocity: sparkVel,
+        life: 0,
+        maxLife: 0.15 + Math.random() * 0.2,
+        baseScale: 0.45,
+        rotationSpeed: 0,
+        type: 'spark',
+      });
+    }
+  }
+
+  /**
    * Animate particle positions, scales, billboarding, and fade-outs.
    */
   public update(dt: number, camera: THREE.Camera): void {
@@ -212,8 +252,8 @@ export class ParticleManager {
       p.mesh.position.addScaledVector(p.velocity, dt);
       const progress = p.life / p.maxLife;
 
-      if (p.type === 'flame') {
-        const fScale = (1.0 - progress) * 1.6;
+      if (p.type === 'flame' || p.type === 'spark') {
+        const fScale = (1.0 - progress) * (p.type === 'spark' ? 0.6 : 1.6);
         p.mesh.scale.set(fScale, fScale, fScale);
         const mat = p.mesh.material as THREE.MeshBasicMaterial;
         mat.opacity = 1.0 - progress;

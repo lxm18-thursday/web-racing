@@ -37,6 +37,7 @@ export interface VehicleTelemetry {
   s2Status: 'none' | 'yellow' | 'green' | 'purple';
   s3Status: 'none' | 'yellow' | 'green' | 'purple';
   trackProgress: number; // 0 to 1 along circuit
+  isStuck?: boolean;
 }
 
 export interface CarVisualConfig {

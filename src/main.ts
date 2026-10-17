@@ -256,7 +256,10 @@ class GameApp {
   };
 }
 
-// Start game after DOM content loaded
-window.addEventListener('DOMContentLoaded', () => {
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', () => {
+    new GameApp();
+  });
+} else {
   new GameApp();
-});
+}

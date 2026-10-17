@@ -39,6 +39,11 @@ export class VehicleController {
   private currentSteerAngle: number = 0;
   private wheelSpinAngle: number = 0;
 
+  // Anti-stuck and reverse state
+  public isStuck: boolean = false;
+  private stuckTimer: number = 0;
+  private reverseHoldTimer: number = 0;
+
   // Inputs
   private lastThrottle: number = 0;
   private lastBrake: number = 0;
@@ -75,7 +80,22 @@ export class VehicleController {
     private waypoints: TrackWaypoints | null = null,
     private particleManager: ParticleManager | null = null,
     private skidMarkManager: SkidMarkManager | null = null
-  ) {}
+  ) {
+    // Connect collision sound & spark emitter
+    if (this.physics) {
+      this.physics.onCollision = (impactSpeed: number, pos: CANNON.Vec3) => {
+        if (this.soundEngine) {
+          this.soundEngine.triggerCrashSound(impactSpeed);
+        }
+        if (this.particleManager) {
+          const p = new THREE.Vector3(pos.x, pos.y, pos.z);
+          const vel = this.physics.chassisBody.velocity;
+          const v = new THREE.Vector3(vel.x, vel.y, vel.z).normalize();
+          this.particleManager.emitSparks(p, v, Math.floor(Math.min(18, impactSpeed * 0.8)));
+        }
+      };
+    }
+  }
 
   public update(dt: number, input: VehicleInput): void {
     this.lastThrottle = input.throttle;
@@ -193,10 +213,18 @@ export class VehicleController {
     this.currentRpm = Math.max(VehicleController.IDLE_RPM, Math.min(VehicleController.REDLINE_RPM, this.currentRpm));
 
     // Calculate Engine Torque based on RPM curve
-    // Torque peaks at 5000 RPM
+    // In Automatic Mode when in Reverse: 'S' pedal (input.brake) acts as reverse throttle, 'W' pedal (input.throttle) acts as brake
+    let activeThrottle = input.throttle;
+    let activeBrake = input.brake;
+
+    if (this.isAuto && this.currentGearIndex === 0) {
+      activeThrottle = input.brake;
+      activeBrake = input.throttle;
+    }
+
     const rpmNorm = (this.currentRpm - VehicleController.IDLE_RPM) / (VehicleController.REDLINE_RPM - VehicleController.IDLE_RPM);
     const torqueCurve = Math.sin(Math.max(0, Math.min(Math.PI, rpmNorm * Math.PI))) * 0.8 + 0.2;
-    let engineTorque = VehicleController.MAX_TORQUE * torqueCurve * input.throttle;
+    let engineTorque = VehicleController.MAX_TORQUE * torqueCurve * activeThrottle;
 
     if (this.shiftCutTimer > 0) {
       engineTorque = 0; // Cut power during gear change
@@ -204,21 +232,21 @@ export class VehicleController {
 
     // Drive Force to Rear Wheels
     const totalRatio = activeRatio * this.finalDrive;
-    let wheelDriveForce = (engineTorque * totalRatio) / 0.35; // F = Torque / radius
+    let wheelDriveForce = (engineTorque * Math.abs(totalRatio)) / 0.35; // F = Torque / radius
 
     if (this.isBoosting) {
       wheelDriveForce *= 1.45;
     }
 
     // Apply Engine Force to Cannon-es Vehicle
-    // NOTE: In Cannon-es RaycastVehicle with indexRightAxis: 0 (X), indexUpAxis: 1 (Y),
-    // the forward contact friction vector is Up x Right = (0, 1, 0) x (1, 0, 0) = (0, 0, -1).
-    // Therefore, negative engineForce accelerates forward (+Z), and positive engineForce reverses (-Z).
-    const isReversing = activeRatio < 0;
-    if (isReversing) {
-      this.physics.vehicle.applyEngineForce(Math.abs(wheelDriveForce) * 0.65, 2);
-      this.physics.vehicle.applyEngineForce(Math.abs(wheelDriveForce) * 0.65, 3);
+    // In our coordinate system with indexRightAxis: 0 (X), indexUpAxis: 1 (Y), forwardWS is (0, 0, -1).
+    // Positive engineForce propels backward (-Z in world), negative engineForce propels forward (+Z in world).
+    if (this.currentGearIndex === 0) {
+      // Reverse: positive engine force drives backwards with full torque
+      this.physics.vehicle.applyEngineForce(wheelDriveForce * 0.85, 2);
+      this.physics.vehicle.applyEngineForce(wheelDriveForce * 0.85, 3);
     } else if (activeRatio > 0) {
+      // Forward: negative engine force drives forwards
       this.physics.vehicle.applyEngineForce(-wheelDriveForce * 0.5, 2);
       this.physics.vehicle.applyEngineForce(-wheelDriveForce * 0.5, 3);
     } else {
@@ -228,8 +256,8 @@ export class VehicleController {
 
     // 6. Braking System (60% Front, 40% Rear bias)
     const maxBrakeForce = 6500;
-    let frontBrake = input.brake * maxBrakeForce * 0.6;
-    let rearBrake = input.brake * maxBrakeForce * 0.4;
+    let frontBrake = activeBrake * maxBrakeForce * 0.6;
+    let rearBrake = activeBrake * maxBrakeForce * 0.4;
 
     if (input.handbrake) {
       rearBrake = maxBrakeForce * 1.5; // Handbrake locks rear wheels for drifting
@@ -241,18 +269,14 @@ export class VehicleController {
     this.physics.vehicle.setBrake(rearBrake, 3);
 
     // Dynamic brake lights
-    this.model.setBrakeState(input.brake > 0.05 || input.handbrake);
+    this.model.setBrakeState(activeBrake > 0.05 || input.handbrake);
 
-    // 7. Optimized Progressive Speed-Sensitive Steering
-    // Prevents high-speed over-rotation/loss of control on slight keypress
-    // Low speed (0-40 km/h): 31 deg (0.54 rad) for tight hairpins and grid maneuvering
-    // Mid speed (120 km/h): 16 deg (0.28 rad) for technical chicanes
-    // High speed (200 km/h): 9.2 deg (0.16 rad) for sweepers
-    // Ultra speed (280+ km/h): 5.0 deg (0.088 rad) rock-solid straight stability
+    // 7. Corrected Progressive Speed-Sensitive Steering
+    // Inverted sign aligns steering with screen perspective (KeyA = turn screen left, KeyD = turn screen right)
     const speedNorm = Math.min(1.0, speedKmh / 300);
     const steerFactor = 1.0 / (1.0 + speedNorm * speedNorm * 5.6);
     const maxSteerRad = 0.54 * steerFactor;
-    const targetSteerAngle = input.steer * maxSteerRad; // Right is positive in Cannon coordinate
+    const targetSteerAngle = -input.steer * maxSteerRad;
 
     // Speed-adaptive steering response rate: fast at low speed, gentle and stable at high speed
     const slewRate = 14.0 - speedNorm * 5.5;
@@ -260,11 +284,31 @@ export class VehicleController {
     this.physics.vehicle.setSteeringValue(this.currentSteerAngle, 0);
     this.physics.vehicle.setSteeringValue(this.currentSteerAngle, 1);
 
-    // 8. Vehicle Reset
+    // 8. Vehicle Reset & Anti-Stuck System
     if (input.reset && this.waypoints) {
       const nearestWp = this.waypoints.getWaypoint(this.closestWaypointIdx);
       this.physics.resetTo(nearestWp.position, nearestWp.tangent);
+      this.currentGearIndex = 2; // Reset to 1st gear
       this.skidMarkManager?.reset();
+      this.stuckTimer = 0;
+      this.isStuck = false;
+    }
+
+    // Auto-rescue detection: if car is trapped against a wall or stuck at low speed with throttle pressed
+    if ((input.throttle > 0.4 || input.brake > 0.4) && speedKmh < 1.2) {
+      this.stuckTimer += dt;
+      if (this.stuckTimer > 1.8) {
+        this.isStuck = true;
+      }
+      if (this.stuckTimer > 3.0 && this.waypoints) {
+        // Nudge vehicle up and away from obstacle to unjam
+        this.physics.chassisBody.position.y += 0.35;
+        this.physics.chassisBody.angularVelocity.set(0, 0, 0);
+        this.stuckTimer = 1.2;
+      }
+    } else {
+      this.stuckTimer = Math.max(0, this.stuckTimer - dt * 2.5);
+      if (this.stuckTimer <= 0.4) this.isStuck = false;
     }
 
     // 9. Sync 3D Visual Mesh
@@ -334,28 +378,36 @@ export class VehicleController {
   }
 
   private handleAutomaticTransmission(speedKmh: number, throttle: number, brake: number): void {
-    // Reverse logic: stopped and holding brake
-    if (speedKmh < 3 && brake > 0.5) {
-      if (this.currentGearIndex !== 0) {
-        this.changeGear(0); // Switch to Reverse
+    // 1. Shift to Reverse: car is stopped or nearly stopped and holding brake / S pedal
+    if (this.currentGearIndex !== 0) {
+      if (speedKmh < 2.5 && brake > 0.35) {
+        this.reverseHoldTimer += 0.016;
+        if (this.reverseHoldTimer > 0.15) {
+          this.changeGear(0); // Engage Reverse
+          this.reverseHoldTimer = 0;
+        }
+      } else {
+        this.reverseHoldTimer = 0;
       }
-      return;
     }
 
-    // From reverse to 1st gear
-    if (this.currentGearIndex === 0 && throttle > 0.2) {
-      this.changeGear(2); // 1st gear
-      return;
+    // 2. Shift from Reverse to 1st Gear: car is stopped or nearly stopped and pressing throttle / W pedal
+    if (this.currentGearIndex === 0) {
+      if (speedKmh < 2.5 && throttle > 0.35) {
+        this.changeGear(2); // Engage 1st gear
+        this.reverseHoldTimer = 0;
+        return;
+      }
     }
 
-    // Upshifts: near 7600 RPM
+    // Upshifts: near 7500 RPM
     if (this.currentGearIndex >= 2 && this.currentGearIndex < 7) {
       if (this.currentRpm > 7500 && throttle > 0.4) {
         this.changeGear(this.currentGearIndex + 1);
       }
     }
 
-    // Downshifts: under 3000 RPM
+    // Downshifts: under 2900 RPM
     if (this.currentGearIndex > 2) {
       if (this.currentRpm < 2900 || (brake > 0.6 && this.currentRpm < 3800)) {
         this.changeGear(this.currentGearIndex - 1);
@@ -420,9 +472,9 @@ export class VehicleController {
       hubGroup.rotation.x = this.wheelSpinAngle;
     }
 
-    // Cockpit interior steering wheel rotation
+    // Cockpit interior steering wheel rotation (aligned with wheel turn direction)
     if (this.model.steeringWheel) {
-      this.model.steeringWheel.rotation.z = -this.currentSteerAngle * 2.8;
+      this.model.steeringWheel.rotation.z = this.currentSteerAngle * 2.8;
     }
   }
 
@@ -518,6 +570,7 @@ export class VehicleController {
       s2Status: this.s2Status,
       s3Status: this.s3Status,
       trackProgress: this.prevProgressT,
+      isStuck: this.isStuck,
     };
   }
 }

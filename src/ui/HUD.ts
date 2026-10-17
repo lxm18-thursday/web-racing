@@ -48,7 +48,9 @@ export class HUD {
   private tachCanvas!: HTMLCanvasElement;
   private tachCtx!: CanvasRenderingContext2D;
 
-  // Start Screen
+  // Recovery Alert
+  private recoveryTipEl!: HTMLElement;
+
   public startScreenEl!: HTMLElement;
   public onStartClicked?: () => void;
   public onCameraClicked?: () => void;
@@ -476,6 +478,25 @@ export class HUD {
         font-family: monospace;
         font-weight: bold;
       }
+      .recovery-tip {
+        position: absolute;
+        top: 26%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(180, 20, 20, 0.90);
+        color: #ffffff;
+        padding: 12px 24px;
+        border-radius: 8px;
+        font-weight: 700;
+        font-size: 15px;
+        letter-spacing: 0.5px;
+        border: 2px solid #ffcc00;
+        box-shadow: 0 0 30px rgba(255, 60, 0, 0.7);
+        display: none;
+        pointer-events: none;
+        z-index: 100;
+        text-shadow: 0 1px 4px #000;
+      }
     `;
     document.head.appendChild(style);
   }
@@ -635,7 +656,10 @@ export class HUD {
         <div class="ctrl-row"><span class="ctrl-desc">Reset Car</span><span class="ctrl-key">R</span></div>
       </div>
     `;
-    document.body.appendChild(this.startScreenEl);
+    this.recoveryTipEl = document.createElement('div');
+    this.recoveryTipEl.className = 'recovery-tip';
+    this.recoveryTipEl.innerHTML = '⚠️ 赛车受阻：按 [R] 键快速重置赛车 / 长按 [S] 倒车脱困';
+    this.container.appendChild(this.recoveryTipEl);
 
     // Cache elements
     this.speedEl = document.getElementById('hud-speed')!;
@@ -703,10 +727,22 @@ export class HUD {
     this.speedEl.textContent = Math.round(telemetry.speedKmh).toString();
 
     let gearStr = telemetry.gear.toString();
-    if (telemetry.gear === -1) gearStr = 'R';
-    else if (telemetry.gear === 0) gearStr = 'N';
+    if (telemetry.gear === -1) {
+      gearStr = 'R';
+      this.gearEl.style.color = '#ffaa00'; // High-visibility amber for Reverse
+    } else if (telemetry.gear === 0) {
+      gearStr = 'N';
+      this.gearEl.style.color = '#ffffff';
+    } else {
+      this.gearEl.style.color = '#ffcc00';
+    }
     this.gearEl.textContent = gearStr;
     this.modeEl.textContent = telemetry.isAuto ? 'AT' : 'MT';
+
+    // Show recovery prompt when car is stuck
+    if (this.recoveryTipEl) {
+      this.recoveryTipEl.style.display = telemetry.isStuck ? 'block' : 'none';
+    }
 
     // 2. Pedals
     this.throttleBarEl.style.height = `${Math.round(telemetry.throttle * 100)}%`;

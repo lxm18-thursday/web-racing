@@ -39,6 +39,10 @@ export class RaycastVehiclePhysics {
   public maxSlip: number = 0;
   public currentSurface: SurfaceType = 'asphalt';
 
+  // Collision callback for impact sound & sparks
+  public onCollision: ((impactSpeed: number, pos: CANNON.Vec3) => void) | null = null;
+  private lastCollisionTime: number = 0;
+
   constructor(
     private physicsWorld: PhysicsWorld,
     private config: VehiclePhysicsConfig = {
@@ -53,17 +57,29 @@ export class RaycastVehiclePhysics {
       dragFactor: 0.38,
     }
   ) {
-    // 1. Create Chassis Rigid Body with clearance above road surface
-    const chassisShape = new CANNON.Box(new CANNON.Vec3(0.85, 0.22, 2.0));
+    // 1. Create Chassis Rigid Body with full physical height coverage to guarantee solid collisions
+    const chassisShape = new CANNON.Box(new CANNON.Vec3(0.88, 0.28, 2.05));
     this.chassisBody = new CANNON.Body({
       mass: this.config.mass,
       material: this.physicsWorld.chassisMaterial,
       linearDamping: 0.04,
       angularDamping: 0.6,
     });
-    // Elevated shape relative to center of mass to prevent any ground snagging
-    this.chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.20, 0));
+    // Elevated shape relative to center of mass for realistic collision volume
+    this.chassisBody.addShape(chassisShape, new CANNON.Vec3(0, 0.26, 0));
     this.physicsWorld.world.addBody(this.chassisBody);
+
+    // Collision listener for metal thud & sparks
+    this.chassisBody.addEventListener('collide', () => {
+      const speed = this.chassisBody.velocity.length();
+      const now = performance.now();
+      if (speed > 2.0 && now - this.lastCollisionTime > 120) {
+        this.lastCollisionTime = now;
+        if (this.onCollision) {
+          this.onCollision(speed, this.chassisBody.position);
+        }
+      }
+    });
 
     // 2. Initialize RaycastVehicle
     this.vehicle = new CANNON.RaycastVehicle({
@@ -248,6 +264,24 @@ export class RaycastVehiclePhysics {
       const dragUnit = vel.unit();
       const rollingDrag = dragUnit.scale(-avgResistance);
       this.chassisBody.applyForce(rollingDrag);
+    }
+
+    // 5. Perimeter Boundary Safety Fence:
+    // If vehicle ever breaches 17.5m lateral offset from track, forcefully reflect inwards
+    if (waypoints) {
+      const cp = this.chassisBody.position;
+      const chassisPos = new THREE.Vector3(cp.x, cp.y, cp.z);
+      const cIdx = waypoints.getClosestWaypointIndex(chassisPos, hintWpIdx);
+      const refWp = waypoints.getWaypoint(cIdx);
+      const toChassis = chassisPos.clone().sub(refWp.position);
+      const latSigned = toChassis.dot(refWp.binormal);
+      if (Math.abs(latSigned) > 17.0) {
+        const inwardDir = refWp.binormal.clone().multiplyScalar(latSigned > 0 ? -1 : 1);
+        const bounceForce = new CANNON.Vec3(inwardDir.x, inwardDir.y, inwardDir.z).scale(35000);
+        this.chassisBody.applyForce(bounceForce);
+        // Damp outward velocity
+        this.chassisBody.velocity.scale(0.85, this.chassisBody.velocity);
+      }
     }
 
     this.maxSlip = Math.min(1.0, maxSlip);

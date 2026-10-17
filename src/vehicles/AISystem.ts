@@ -168,7 +168,7 @@ export class AISystem {
 
       // Steering angle calculation (local X / local Z)
       const angle = Math.atan2(localTarget.x, Math.max(0.1, localTarget.z));
-      const steer = Math.max(-1.0, Math.min(1.0, angle * 1.8));
+      const steer = Math.max(-1.0, Math.min(1.0, -angle * 1.8));
 
       // Speed regulation & Corner Braking
       const desiredSpeedKmh = targetWp.targetSpeedKmh * ai.speedSkillFactor;
