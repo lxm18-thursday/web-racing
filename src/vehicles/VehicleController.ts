@@ -166,7 +166,7 @@ export class VehicleController {
 
     // Automatic transmission logic
     if (this.isAuto) {
-      this.handleAutomaticTransmission(speedKmh, input.throttle, input.brake);
+      this.handleAutomaticTransmission(speedKmh, input.throttle, input.brake, input.handbrake);
     }
 
     // Calculate RPM based on vehicle and wheel speed
@@ -389,26 +389,35 @@ export class VehicleController {
     }
   }
 
-  private handleAutomaticTransmission(speedKmh: number, throttle: number, brake: number): void {
-    // 1. Shift to Reverse: car is stopped or nearly stopped and holding brake / S pedal
-    if (this.currentGearIndex !== 0) {
-      if (speedKmh < 2.5 && brake > 0.35) {
-        this.reverseHoldTimer += 0.016;
-        if (this.reverseHoldTimer > 0.15) {
-          this.changeGear(0); // Engage Reverse
-          this.reverseHoldTimer = 0;
-        }
-      } else {
+  private handleAutomaticTransmission(speedKmh: number, throttle: number, brake: number, handbrake: boolean = false): void {
+    // If handbrake is active (e.g. pre-race staging on grid), do not shift between forward and reverse
+    if (handbrake) {
+      this.reverseHoldTimer = 0;
+      return;
+    }
+
+    // 1. Shift from Reverse to 1st Gear: the instant W / throttle is pressed
+    if (this.currentGearIndex === 0) {
+      if (throttle > 0.15) {
+        this.currentGearIndex = 2; // Engage 1st gear immediately
+        this.shiftCutTimer = 0;     // Instant response, no lag
         this.reverseHoldTimer = 0;
+        return;
       }
     }
 
-    // 2. Shift from Reverse to 1st Gear: car is stopped or nearly stopped and pressing throttle / W pedal
-    if (this.currentGearIndex === 0) {
-      if (speedKmh < 2.5 && throttle > 0.35) {
-        this.changeGear(2); // Engage 1st gear
+    // 2. Shift to Reverse: car is stopped or nearly stopped (< 2.0 km/h) and holding S / brake pedal
+    if (this.currentGearIndex !== 0) {
+      if (speedKmh < 2.0 && brake > 0.35 && throttle < 0.1) {
+        this.reverseHoldTimer += 0.016;
+        if (this.reverseHoldTimer > 0.10) {
+          this.currentGearIndex = 0; // Engage Reverse
+          this.shiftCutTimer = 0;     // Instant reverse power
+          this.reverseHoldTimer = 0;
+          return;
+        }
+      } else {
         this.reverseHoldTimer = 0;
-        return;
       }
     }
 

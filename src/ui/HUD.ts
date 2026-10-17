@@ -841,8 +841,8 @@ export class HUD {
       b.className = 'cd-bulb';
     }
 
-    // Step 1 to 5: Turn on bulbs one by one
-    const stageTimes = [450, 1100, 1750, 2400, 3050];
+    // Step 1 to 5: Turn on bulbs one by one (fast, responsive ~1.5s sequence)
+    const stageTimes = [200, 450, 700, 950, 1200];
     stageTimes.forEach((delay, idx) => {
       setTimeout(() => {
         if (this.cdBulbs[idx]) {
@@ -854,9 +854,9 @@ export class HUD {
       }, delay);
     });
 
-    // Random suspense hold after 5th light (between 800ms and 1500ms)
-    const randomHold = 800 + Math.random() * 700;
-    const launchTime = 3050 + randomHold;
+    // Random suspense hold after 5th light (between 300ms and 500ms)
+    const randomHold = 300 + Math.random() * 200;
+    const launchTime = 1200 + randomHold;
 
     setTimeout(() => {
       // ALL LIGHTS OUT!

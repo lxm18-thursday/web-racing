@@ -122,6 +122,7 @@ class GameApp {
     // Connect HUD callbacks
     this.hud.onStartClicked = () => {
       this.isStarted = true;
+      this.playerVehicle.currentGearIndex = 2; // Guaranteed 1st gear on launch
       this.playerVehicle.currentLapTime = 0;
       this.soundEngine.resume();
     };
@@ -185,6 +186,7 @@ class GameApp {
       if (!this.isStarted) {
         input.brake = 1.0;
         input.handbrake = true;
+        this.playerVehicle.currentGearIndex = 2; // Keep in 1st gear on grid, never reverse!
       }
 
       // Quick single-press actions
