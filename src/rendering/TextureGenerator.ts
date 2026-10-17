@@ -401,4 +401,202 @@ export class TextureGenerator {
     this.cache.set(key, texture);
     return texture;
   }
+
+  /**
+   * Procedural Braking Distance Board texture (150m, 100m, 50m).
+   */
+  public static createDistanceMarkerTexture(dist: string): THREE.CanvasTexture {
+    const key = `dist_marker_${dist}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const width = 256;
+    const height = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+
+    // White reflective sign background
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, width, height);
+
+    // Thick black border
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = '#0f172a';
+    ctx.strokeRect(7, 7, width - 14, height - 14);
+
+    // Top high-visibility red racing header bar
+    ctx.fillStyle = '#dc2626';
+    ctx.fillRect(14, 14, width - 28, 28);
+
+    // Big bold distance numerals
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 105px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(dist, width / 2, height / 2 + 10);
+
+    // Bottom horizontal countdown bars (3 bars for 150, 2 for 100, 1 for 50)
+    const barCount = dist === '150' ? 3 : dist === '100' ? 2 : 1;
+    const barW = 48;
+    const barH = 12;
+    const spacing = 16;
+    const totalW = barCount * barW + (barCount - 1) * spacing;
+    const startX = (width - totalW) / 2;
+    ctx.fillStyle = '#dc2626';
+    for (let i = 0; i < barCount; i++) {
+      ctx.fillRect(startX + i * (barW + spacing), height - 38, barW, barH);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  /**
+   * Procedural Trackside Sponsor Advertising Billboard Texture.
+   */
+  public static createSponsorBannerTexture(brandIndex: number): THREE.CanvasTexture {
+    const key = `sponsor_banner_${brandIndex}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const width = 512;
+    const height = 128;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+
+    const brands = [
+      { bg: '#fcd34d', border: '#b45309', text: 'PIRELLI', sub: 'P ZERO RACING', textColor: '#dc2626' },
+      { bg: '#ffffff', border: '#dc2626', text: 'brembo', sub: 'HIGH PERFORMANCE BRAKES', textColor: '#dc2626' },
+      { bg: '#0b132b', border: '#00e5ff', text: 'ANTIGRAVITY', sub: 'DYNAMIC AI SIMULATION', textColor: '#00e5ff' },
+      { bg: '#dc2626', border: '#facc15', text: 'SHELL', sub: 'V-POWER NITRO+', textColor: '#facc15' },
+      { bg: '#064e3b', border: '#10b981', text: 'TAG HEUER', sub: 'OFFICIAL TIMEKEEPER', textColor: '#f8fafc' },
+      { bg: '#1e3a8a', border: '#3b82f6', text: 'Mobil 1', sub: 'SYNTHETIC MOTOR OIL', textColor: '#f8fafc' },
+    ];
+
+    const b = brands[brandIndex % brands.length];
+
+    // Background fill
+    ctx.fillStyle = b.bg;
+    ctx.fillRect(0, 0, width, height);
+
+    // Bevel frame border
+    ctx.lineWidth = 8;
+    ctx.strokeStyle = b.border;
+    ctx.strokeRect(4, 4, width - 8, height - 8);
+
+    // Main Brand Title
+    ctx.fillStyle = b.textColor;
+    ctx.font = '900 52px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.letterSpacing = '3px';
+    ctx.fillText(b.text, width / 2, height * 0.42);
+
+    // Subtitle / Tagline
+    ctx.font = '700 16px -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif';
+    ctx.letterSpacing = '2px';
+    ctx.fillStyle = b.textColor === '#dc2626' && b.bg === '#ffffff' ? '#1e293b' : b.textColor;
+    ctx.fillText(b.sub, width / 2, height * 0.78);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  /**
+   * Procedural Tire Barrier Stack Texture (FIA Red & White interlocking tires).
+   */
+  public static createTireBarrierTexture(): THREE.CanvasTexture {
+    const key = 'tire_barrier_stack';
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const width = 128;
+    const height = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d')!;
+
+    const tireRows = 4;
+    const rowH = height / tireRows;
+
+    for (let r = 0; r < tireRows; r++) {
+      const isRed = r % 2 === 0;
+      ctx.fillStyle = isRed ? '#b91c1c' : '#f1f5f9';
+      ctx.fillRect(0, r * rowH, width, rowH);
+
+      // Tire sidewall curved shadow
+      const grad = ctx.createLinearGradient(0, r * rowH, 0, (r + 1) * rowH);
+      grad.addColorStop(0, 'rgba(0,0,0,0.5)');
+      grad.addColorStop(0.2, 'rgba(255,255,255,0.2)');
+      grad.addColorStop(0.8, 'rgba(0,0,0,0.1)');
+      grad.addColorStop(1, 'rgba(0,0,0,0.6)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, r * rowH, width, rowH);
+
+      // Belt wrapping band
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.75)';
+      ctx.fillRect(0, r * rowH + rowH * 0.42, width, rowH * 0.16);
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
+
+  /**
+   * Procedural Racing Livery Texture with dual racing stripes and race number roundel.
+   */
+  public static createCarLiveryTexture(
+    baseHex: number,
+    accentHex: number,
+    raceNumber: string
+  ): THREE.CanvasTexture {
+    const key = `livery_${baseHex}_${accentHex}_${raceNumber}`;
+    if (this.cache.has(key)) return this.cache.get(key)!;
+
+    const size = 512;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d')!;
+
+    // Base body color
+    ctx.fillStyle = `#${baseHex.toString(16).padStart(6, '0')}`;
+    ctx.fillRect(0, 0, size, size);
+
+    // Accent dual racing stripes down the center
+    const accentCol = `#${accentHex.toString(16).padStart(6, '0')}`;
+    ctx.fillStyle = accentCol;
+    const stripeW = 34;
+    const gap = 16;
+    ctx.fillRect(size / 2 - stripeW - gap / 2, 0, stripeW, size);
+    ctx.fillRect(size / 2 + gap / 2, 0, stripeW, size);
+
+    // White racing number circle on the hood / doors
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(size / 2, size * 0.45, 68, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dark circle border
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#0f172a';
+    ctx.stroke();
+
+    // Race Number
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 68px "Consolas", -apple-system, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(raceNumber || '01', size / 2, size * 0.45 + 4);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    this.cache.set(key, texture);
+    return texture;
+  }
 }
+

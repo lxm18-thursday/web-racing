@@ -98,6 +98,10 @@ export class VehicleController {
   }
 
   public update(dt: number, input: VehicleInput): void {
+    // Detect aggressive throttle lift-off at high RPM for Turbo Blow-Off Valve flutter
+    if (this.lastThrottle > 0.6 && input.throttle < 0.15 && this.currentRpm > 4200) {
+      this.soundEngine?.triggerBovFlutter();
+    }
     this.lastThrottle = input.throttle;
     this.lastBrake = input.brake;
 
@@ -238,6 +242,11 @@ export class VehicleController {
       wheelDriveForce *= 1.45;
     }
 
+    // Launch control / grid staging hold: allow full throttle revving without creeping forward
+    if (input.handbrake && input.brake >= 0.85 && speedKmh < 1.5) {
+      wheelDriveForce = 0;
+    }
+
     // Apply Engine Force to Cannon-es Vehicle
     // In our coordinate system with indexRightAxis: 0 (X), indexUpAxis: 1 (Y), forwardWS is (0, 0, -1).
     // Positive engineForce propels backward (-Z in world), negative engineForce propels forward (+Z in world).
@@ -294,8 +303,8 @@ export class VehicleController {
       this.isStuck = false;
     }
 
-    // Auto-rescue detection: if car is trapped against a wall or stuck at low speed with throttle pressed
-    if ((input.throttle > 0.4 || input.brake > 0.4) && speedKmh < 1.2) {
+    // Auto-rescue detection: only if car is trapped against a wall with forward throttle pressed without braking
+    if (input.throttle > 0.5 && input.brake < 0.2 && speedKmh < 1.2) {
       this.stuckTimer += dt;
       if (this.stuckTimer > 1.8) {
         this.isStuck = true;
@@ -307,12 +316,12 @@ export class VehicleController {
         this.stuckTimer = 1.2;
       }
     } else {
-      this.stuckTimer = Math.max(0, this.stuckTimer - dt * 2.5);
-      if (this.stuckTimer <= 0.4) this.isStuck = false;
+      this.stuckTimer = 0;
+      this.isStuck = false;
     }
 
     // 9. Sync 3D Visual Mesh
-    this.syncVisuals(dt, speedKmh);
+    this.syncVisuals(dt, speedKmh, input.brake);
 
     // 10. Lap Timing and Sectors
     this.updateLapTracking(dt);
@@ -445,12 +454,20 @@ export class VehicleController {
   /**
    * Sync Cannon-es physics body transforms with Three.js rendering meshes.
    */
-  private syncVisuals(dt: number, speedKmh: number): void {
+  private syncVisuals(dt: number, speedKmh: number, inputBrake: number): void {
     const chassisBody = this.physics.chassisBody;
 
-    // Sync chassis mesh position and rotation
+    // Sync chassis mesh position
     this.model.chassisMesh.position.set(chassisBody.position.x, chassisBody.position.y, chassisBody.position.z);
-    this.model.chassisMesh.quaternion.set(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+
+    // Weight transfer body pitch (dive on braking, squat on acceleration) and roll on high-G cornering
+    const baseQuat = new THREE.Quaternion(chassisBody.quaternion.x, chassisBody.quaternion.y, chassisBody.quaternion.z, chassisBody.quaternion.w);
+    const pitch = Math.max(-0.045, Math.min(0.045, -this.gForceLong * 0.024));
+    const roll = Math.max(-0.04, Math.min(0.04, this.gForceLat * 0.020));
+    const tiltEuler = new THREE.Euler(pitch, 0, roll, 'XYZ');
+    const tiltQuat = new THREE.Quaternion().setFromEuler(tiltEuler);
+    baseQuat.multiply(tiltQuat);
+    this.model.chassisMesh.quaternion.copy(baseQuat);
 
     // Wheel axle spin based on speed
     const spinRate = (speedKmh / 3.6 / 0.35) * dt;
@@ -476,6 +493,17 @@ export class VehicleController {
     if (this.model.steeringWheel) {
       this.model.steeringWheel.rotation.z = this.currentSteerAngle * 2.8;
     }
+
+    // Dynamic brake rotors heat glow simulation
+    this.model.updateBrakeHeat(inputBrake, speedKmh, dt);
+
+    // Dynamic DRS active aero flap
+    this.model.setDrsState(this.isBoosting);
+
+    // Dynamic 3D steering wheel cockpit OLED display
+    let gearNumber = this.currentGearIndex - 1;
+    if (this.currentGearIndex === 0) gearNumber = -1;
+    this.model.updateCockpitDash(gearNumber, speedKmh, this.currentRpm);
   }
 
   /**

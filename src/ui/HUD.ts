@@ -51,8 +51,18 @@ export class HUD {
   // Recovery Alert
   private recoveryTipEl!: HTMLElement;
 
+  // Race Position DOM
+  private posBadgeEl!: HTMLElement;
+
+  // FIA Countdown Lights DOM
+  public countdownOverlayEl!: HTMLElement;
+  private cdBulbs: HTMLElement[] = [];
+  private cdBannerEl!: HTMLElement;
+  private isCountingDown: boolean = false;
+
   public startScreenEl!: HTMLElement;
   public onStartClicked?: () => void;
+  public onCountdownStage?: (stage: number) => void;
   public onCameraClicked?: () => void;
   public onWeatherClicked?: () => void;
   public onResetClicked?: () => void;
@@ -165,6 +175,74 @@ export class HUD {
       .sector-purple { background: rgba(186, 85, 211, 0.4); border-color: #ba55d3; color: #f3c4fb; }
       .sector-green { background: rgba(46, 204, 113, 0.4); border-color: #2ecc71; color: #a3f7c4; }
       .sector-yellow { background: rgba(241, 196, 15, 0.4); border-color: #f1c40f; color: #fef1b8; }
+
+      .pos-badge {
+        font-size: 15px;
+        font-weight: 900;
+        padding: 2px 8px;
+        border-radius: 4px;
+        background: rgba(255, 204, 0, 0.2);
+        border: 1px solid #ffcc00;
+        color: #ffcc00;
+        letter-spacing: 1px;
+        margin-right: 8px;
+      }
+      .pos-badge.p1 {
+        background: linear-gradient(135deg, rgba(255, 215, 0, 0.4), rgba(255, 140, 0, 0.3));
+        border-color: #ffd700;
+        color: #ffffff;
+        text-shadow: 0 0 8px #ffd700;
+        box-shadow: 0 0 12px rgba(255, 215, 0, 0.4);
+      }
+
+      /* Countdown Lights Overlay */
+      .countdown-overlay {
+        position: absolute;
+        top: 28%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        z-index: 200;
+        pointer-events: none;
+      }
+      .countdown-housing {
+        display: flex;
+        gap: 18px;
+        background: rgba(12, 16, 26, 0.95);
+        border: 2px solid rgba(255, 255, 255, 0.35);
+        border-radius: 20px;
+        padding: 18px 30px;
+        box-shadow: 0 12px 50px rgba(0, 0, 0, 0.9);
+      }
+      .cd-bulb {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: #1c0505;
+        border: 3px solid rgba(255, 255, 255, 0.25);
+        transition: background 0.05s, box-shadow 0.05s;
+      }
+      .cd-bulb.on {
+        background: #ff1111;
+        box-shadow: 0 0 30px #ff1111, 0 0 60px rgba(255, 20, 20, 0.9);
+      }
+      .countdown-banner {
+        margin-top: 18px;
+        font-size: 34px;
+        font-weight: 900;
+        letter-spacing: 3px;
+        color: #00ff66;
+        text-shadow: 0 0 25px #00ff66, 0 0 50px rgba(0, 255, 102, 0.6);
+        opacity: 0;
+        transform: scale(0.85);
+        transition: opacity 0.2s, transform 0.2s;
+      }
+      .countdown-banner.show {
+        opacity: 1;
+        transform: scale(1.0);
+      }
 
       /* Top Center: Shift Light LEDs */
       .shift-light-bar {
@@ -510,8 +588,11 @@ export class HUD {
     const timingBoard = document.createElement('div');
     timingBoard.className = 'hud-panel timing-board';
     timingBoard.innerHTML = `
-      <div class="timing-row">
-        <span>LAP <b id="hud-lap-num">1</b></span>
+      <div class="timing-row" style="align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span class="pos-badge p1" id="hud-pos-badge">P1</span>
+          <span>LAP <b id="hud-lap-num">1</b></span>
+        </div>
         <span style="color: rgba(255,255,255,0.6)">BEST: <b id="hud-best-time">--:--.---</b></span>
       </div>
       <div class="timing-row main" id="hud-curr-time">0:00.000</div>
@@ -549,6 +630,30 @@ export class HUD {
     topBar.appendChild(mapPanel);
 
     this.container.appendChild(topBar);
+
+    // Countdown Lights Overlay
+    this.countdownOverlayEl = document.createElement('div');
+    this.countdownOverlayEl.className = 'countdown-overlay';
+    this.countdownOverlayEl.style.display = 'none';
+    this.countdownOverlayEl.innerHTML = `
+      <div class="countdown-housing">
+        <div class="cd-bulb" id="cd-0"></div>
+        <div class="cd-bulb" id="cd-1"></div>
+        <div class="cd-bulb" id="cd-2"></div>
+        <div class="cd-bulb" id="cd-3"></div>
+        <div class="cd-bulb" id="cd-4"></div>
+      </div>
+      <div class="countdown-banner" id="cd-banner">LIGHTS OUT AND AWAY WE GO!</div>
+    `;
+    this.container.appendChild(this.countdownOverlayEl);
+    this.cdBulbs = [
+      this.countdownOverlayEl.querySelector('#cd-0')!,
+      this.countdownOverlayEl.querySelector('#cd-1')!,
+      this.countdownOverlayEl.querySelector('#cd-2')!,
+      this.countdownOverlayEl.querySelector('#cd-3')!,
+      this.countdownOverlayEl.querySelector('#cd-4')!,
+    ];
+    this.cdBannerEl = this.countdownOverlayEl.querySelector('#cd-banner')!;
 
     // 2. Bottom Section
     const bottomBar = document.createElement('div');
@@ -656,6 +761,8 @@ export class HUD {
         <div class="ctrl-row"><span class="ctrl-desc">Reset Car</span><span class="ctrl-key">R</span></div>
       </div>
     `;
+    document.body.appendChild(this.startScreenEl);
+
     this.recoveryTipEl = document.createElement('div');
     this.recoveryTipEl.className = 'recovery-tip';
     this.recoveryTipEl.innerHTML = '⚠️ 赛车受阻：按 [R] 键快速重置赛车 / 长按 [S] 倒车脱困';
@@ -677,12 +784,16 @@ export class HUD {
     this.s1El = document.getElementById('hud-s1')!;
     this.s2El = document.getElementById('hud-s2')!;
     this.s3El = document.getElementById('hud-s3')!;
+    this.posBadgeEl = document.getElementById('hud-pos-badge')!;
 
     // Event listeners
     const handleStart = () => {
-      if (this.startScreenEl.style.display !== 'none') {
-        this.startScreenEl.style.display = 'none';
-        if (this.onStartClicked) this.onStartClicked();
+      if (this.startScreenEl.style.display !== 'none' && !this.isCountingDown) {
+        this.isCountingDown = true;
+        this.startRaceCountdown(() => {
+          this.isCountingDown = false;
+          if (this.onStartClicked) this.onStartClicked();
+        });
       }
     };
 
@@ -715,6 +826,63 @@ export class HUD {
     });
   }
 
+  /**
+   * Dramatic 5-stage FIA race countdown light sequence.
+   */
+  public startRaceCountdown(onLaunch: () => void): void {
+    if (this.startScreenEl.style.display !== 'none') {
+      this.startScreenEl.style.display = 'none';
+    }
+
+    this.countdownOverlayEl.style.display = 'flex';
+    this.countdownOverlayEl.style.opacity = '1';
+    this.cdBannerEl.classList.remove('show');
+    for (const b of this.cdBulbs) {
+      b.className = 'cd-bulb';
+    }
+
+    // Step 1 to 5: Turn on bulbs one by one
+    const stageTimes = [450, 1100, 1750, 2400, 3050];
+    stageTimes.forEach((delay, idx) => {
+      setTimeout(() => {
+        if (this.cdBulbs[idx]) {
+          this.cdBulbs[idx].classList.add('on');
+        }
+        if (this.onCountdownStage) {
+          this.onCountdownStage(idx + 1);
+        }
+      }, delay);
+    });
+
+    // Random suspense hold after 5th light (between 800ms and 1500ms)
+    const randomHold = 800 + Math.random() * 700;
+    const launchTime = 3050 + randomHold;
+
+    setTimeout(() => {
+      // ALL LIGHTS OUT!
+      for (const b of this.cdBulbs) {
+        b.className = 'cd-bulb';
+      }
+      this.cdBannerEl.classList.add('show');
+
+      if (this.onCountdownStage) {
+        this.onCountdownStage(6); // 6 is green / lights out
+      }
+
+      onLaunch();
+
+      // Fade out banner after 1.8 seconds
+      setTimeout(() => {
+        this.countdownOverlayEl.style.opacity = '0';
+        this.countdownOverlayEl.style.transition = 'opacity 0.5s ease';
+        setTimeout(() => {
+          this.countdownOverlayEl.style.display = 'none';
+          this.countdownOverlayEl.style.opacity = '1';
+        }, 500);
+      }, 1800);
+    }, launchTime);
+  }
+
   private initMiniMap(): void {
     // Render static track path on minimap canvas once, then dynamic blips on top
   }
@@ -723,6 +891,30 @@ export class HUD {
    * Update full telemetry HUD in real time.
    */
   public update(telemetry: VehicleTelemetry, aiCars: AICarInstance[]): void {
+    // 0. Calculate Live Race Position (P1 to P4)
+    let position = 1;
+    // Normalize lap 1 grid positions where waypoint index is near 500 (just behind start line)
+    const normPlayerT = (telemetry.lapNumber === 1 && telemetry.trackProgress > 0.90)
+      ? telemetry.trackProgress - 1.0
+      : (telemetry.trackProgress || 0);
+    const playerProgress = (telemetry.lapNumber || 1) + normPlayerT;
+
+    const totalWaypoints = this.waypoints.waypoints.length || 500;
+    for (const ai of aiCars) {
+      const aiWpT = (ai.currentWaypointIdx || 0) / totalWaypoints;
+      const normAiT = ((ai.controller?.lapNumber || 1) === 1 && aiWpT > 0.90)
+        ? aiWpT - 1.0
+        : aiWpT;
+      const aiProgress = (ai.controller?.lapNumber || 1) + normAiT;
+      if (aiProgress > playerProgress) {
+        position++;
+      }
+    }
+    if (this.posBadgeEl) {
+      this.posBadgeEl.textContent = `P${position}`;
+      this.posBadgeEl.className = position === 1 ? 'pos-badge p1' : 'pos-badge';
+    }
+
     // 1. Digital Speed & Gear
     this.speedEl.textContent = Math.round(telemetry.speedKmh).toString();
 
@@ -925,19 +1117,28 @@ export class HUD {
       ctx.fill();
     }
 
-    // Draw Player Car (Cyan triangle with heading)
+    // Draw Player Car (Cyan arrowhead with heading direction)
     const wpIdx = ((Math.floor(playerT * wps.length) % wps.length) + wps.length) % wps.length;
     const playerWp = this.waypoints.getWaypoint(wpIdx);
     const px = mapX(playerWp.position.x);
     const py = mapY(playerWp.position.z);
+    const dir = playerWp.tangent;
+    const angle = Math.atan2(dir.z, dir.x);
 
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.rotate(angle);
     ctx.fillStyle = '#00e5ff';
     ctx.shadowColor = '#00e5ff';
-    ctx.shadowBlur = 8;
+    ctx.shadowBlur = 10;
     ctx.beginPath();
-    ctx.arc(px, py, 4.5, 0, Math.PI * 2);
+    ctx.moveTo(7, 0);
+    ctx.lineTo(-5, -4);
+    ctx.lineTo(-3, 0);
+    ctx.lineTo(-5, 4);
+    ctx.closePath();
     ctx.fill();
-    ctx.shadowBlur = 0;
+    ctx.restore();
   }
 
   private formatTime(seconds: number): string {

@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { TrackData } from './TrackData';
+import { TextureGenerator } from '../rendering/TextureGenerator';
 
 /**
  * Procedural Track Scenery & Architectural Props.
  * Generates Start/Finish Gantry with countdown lights, Grandstands, Distance markers,
- * Floodlight towers, and low-poly trees.
+ * Sponsor billboards, Tire barrier stacks, Floodlight towers, and low-poly trees.
  */
 export class TrackScenery {
   public sceneryGroup: THREE.Group = new THREE.Group();
@@ -15,6 +16,8 @@ export class TrackScenery {
     this.buildGantry();
     this.buildGrandstands();
     this.buildDistanceMarkers();
+    this.buildSponsorBillboards();
+    this.buildTireBarriers();
     this.buildFloodlightTowers();
     this.buildTrees();
   }
@@ -142,36 +145,173 @@ export class TrackScenery {
   }
 
   /**
+   * Set Gantry countdown light stage (0: off, 1-5: progressive red, 6: all out / green).
+   */
+  public setStartLightStage(stage: number): void {
+    for (let i = 0; i < this.gantryLights.length; i++) {
+      const bulb = this.gantryLights[i];
+      const mat = bulb.material as THREE.MeshStandardMaterial;
+      if (stage >= 1 && stage <= 5) {
+        if (i < stage) {
+          mat.color.setHex(0xff0000);
+          mat.emissive.setHex(0xff1111);
+          mat.emissiveIntensity = 4.0;
+        } else {
+          mat.color.setHex(0x220505);
+          mat.emissive.setHex(0x110000);
+          mat.emissiveIntensity = 0.1;
+        }
+      } else if (stage === 6) {
+        // LIGHTS OUT: all go dark or green launch flash
+        mat.color.setHex(0x00ff44);
+        mat.emissive.setHex(0x00ff44);
+        mat.emissiveIntensity = 4.0;
+      } else {
+        // All off / dark
+        mat.color.setHex(0x220505);
+        mat.emissive.setHex(0x110000);
+        mat.emissiveIntensity = 0.1;
+      }
+    }
+  }
+
+  /**
    * Distance countdown marker boards (150m, 100m, 50m before braking zones).
    */
   private buildDistanceMarkers(): void {
-    const boardMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f7, roughness: 0.3 });
-    const postMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x333333, metalness: 0.8, roughness: 0.3 });
+    const backMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.5 });
 
-    // Turn 1 braking zone (around t ~ 0.13)
-    const markerDistances = [
-      { t: 0.125, text: '150' },
-      { t: 0.130, text: '100' },
-      { t: 0.135, text: '50' }
+    const brakingZones = [
+      // Turn 1
+      { t: 0.122, text: '150' },
+      { t: 0.128, text: '100' },
+      { t: 0.134, text: '50' },
+      // Hairpin
+      { t: 0.428, text: '150' },
+      { t: 0.434, text: '100' },
+      { t: 0.440, text: '50' },
+      // Final Chicane
+      { t: 0.865, text: '150' },
+      { t: 0.872, text: '100' },
+      { t: 0.879, text: '50' },
     ];
 
-    for (const m of markerDistances) {
+    for (const m of brakingZones) {
       const frame = this.trackData.getFrameAt(m.t);
       const boardGroup = new THREE.Group();
 
-      const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.2);
+      const postGeo = new THREE.CylinderGeometry(0.08, 0.08, 2.4);
       const post = new THREE.Mesh(postGeo, postMat);
-      post.position.y = 1.1;
+      post.position.y = 1.2;
       boardGroup.add(post);
 
-      const boardGeo = new THREE.BoxGeometry(1.6, 1.0, 0.1);
-      const board = new THREE.Mesh(boardGeo, boardMat);
-      board.position.y = 1.8;
+      const markerTex = TextureGenerator.createDistanceMarkerTexture(m.text);
+      const frontMat = new THREE.MeshStandardMaterial({
+        map: markerTex,
+        roughness: 0.3,
+        metalness: 0.1,
+      });
+
+      const materials = [
+        backMat, backMat, backMat, backMat,
+        frontMat, // Front face (Z+)
+        backMat   // Back face (Z-)
+      ];
+
+      const boardGeo = new THREE.BoxGeometry(1.5, 1.5, 0.08);
+      const board = new THREE.Mesh(boardGeo, materials);
+      board.position.y = 1.9;
       boardGroup.add(board);
 
       boardGroup.position.copy(frame.position).addScaledVector(frame.binormal, -(TrackData.TRACK_WIDTH / 2 + 3.5));
-      boardGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), frame.tangent);
+      boardGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), frame.tangent);
       this.sceneryGroup.add(boardGroup);
+    }
+  }
+
+  /**
+   * Trackside Sponsor Advertising Billboards mounted along Armco barriers.
+   */
+  private buildSponsorBillboards(): void {
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x22262e, metalness: 0.8, roughness: 0.4 });
+    const backMat = new THREE.MeshStandardMaterial({ color: 0x111317, roughness: 0.6 });
+
+    const billboardTValues = [
+      0.02, 0.04, 0.06, 0.08, 0.10, 0.15, 0.22, 0.28, 0.35, 0.41,
+      0.47, 0.52, 0.58, 0.64, 0.70, 0.76, 0.82, 0.88, 0.92, 0.95, 0.98
+    ];
+
+    for (let i = 0; i < billboardTValues.length; i++) {
+      const t = billboardTValues[i];
+      const frame = this.trackData.getFrameAt(t);
+      const side = i % 2 === 0 ? 1 : -1;
+      const group = new THREE.Group();
+
+      const bannerTex = TextureGenerator.createSponsorBannerTexture(i);
+      const bannerMat = new THREE.MeshStandardMaterial({
+        map: bannerTex,
+        roughness: 0.25,
+        metalness: 0.2,
+      });
+
+      const boardGeo = new THREE.BoxGeometry(7.0, 1.8, 0.12);
+      const materials = [
+        backMat, backMat, backMat, backMat,
+        bannerMat,
+        backMat
+      ];
+      const board = new THREE.Mesh(boardGeo, materials);
+      board.position.y = 1.6;
+      board.castShadow = true;
+      group.add(board);
+
+      const legGeo = new THREE.BoxGeometry(0.18, 2.2, 0.18);
+      const legL = new THREE.Mesh(legGeo, postMat);
+      legL.position.set(-2.8, 1.1, 0);
+      group.add(legL);
+
+      const legR = new THREE.Mesh(legGeo, postMat);
+      legR.position.set(2.8, 1.1, 0);
+      group.add(legR);
+
+      const offsetDist = side * (TrackData.TRACK_WIDTH / 2 + 3.8);
+      group.position.copy(frame.position).addScaledVector(frame.binormal, offsetDist);
+      group.quaternion.setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        side === 1 ? frame.binormal.clone().negate() : frame.binormal
+      );
+      this.sceneryGroup.add(group);
+    }
+  }
+
+  /**
+   * Procedural Tire Barrier Stacks (Red & White) placed at corner run-off zones.
+   */
+  private buildTireBarriers(): void {
+    const tireTex = TextureGenerator.createTireBarrierTexture();
+    const barrierMat = new THREE.MeshStandardMaterial({
+      map: tireTex,
+      roughness: 0.85,
+      metalness: 0.1,
+    });
+
+    const hairpinCorners = [0.155, 0.165, 0.455, 0.465, 0.735, 0.745, 0.885, 0.895];
+    const tireStackGeo = new THREE.CylinderGeometry(0.7, 0.7, 1.4, 16);
+
+    for (const t of hairpinCorners) {
+      const frame = this.trackData.getFrameAt(t);
+      const outerOffset = TrackData.TRACK_WIDTH / 2 + 5.0;
+      for (let s = -3; s <= 3; s++) {
+        const stack = new THREE.Mesh(tireStackGeo, barrierMat);
+        const stackPos = frame.position.clone()
+          .addScaledVector(frame.binormal, outerOffset)
+          .addScaledVector(frame.tangent, s * 1.5);
+        stackPos.y += 0.7;
+        stack.position.copy(stackPos);
+        stack.castShadow = true;
+        this.sceneryGroup.add(stack);
+      }
     }
   }
 

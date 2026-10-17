@@ -138,14 +138,14 @@ export class CameraController {
       const gTilt = Math.max(-0.06, Math.min(0.06, gForceLat * 0.025));
       const cockpitPos = vehiclePos.clone()
         .addScaledVector(right, -0.32)
-        .addScaledVector(forward, -0.05)
-        .addScaledVector(up, 0.84)
+        .addScaledVector(forward, -0.02)
+        .addScaledVector(up, 0.88)
         .add(shakeOffset);
 
       const cockpitLook = vehiclePos.clone()
         .addScaledVector(right, -0.32 + gTilt * 2.0)
         .addScaledVector(forward, 40.0)
-        .addScaledVector(up, 0.82);
+        .addScaledVector(up, 0.85);
 
       this.camera.position.copy(cockpitPos);
       this.camera.lookAt(cockpitLook);

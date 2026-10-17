@@ -126,6 +126,16 @@ class GameApp {
       this.soundEngine.resume();
     };
 
+    this.hud.onCountdownStage = (stage: number) => {
+      this.soundEngine.resume();
+      this.trackScenery.setStartLightStage(stage);
+      if (stage >= 1 && stage <= 5) {
+        this.soundEngine.playCountdownBeep(false);
+      } else if (stage === 6) {
+        this.soundEngine.playCountdownBeep(true);
+      }
+    };
+
     this.hud.onCameraClicked = () => {
       this.cameraController.cycleMode();
     };
@@ -171,9 +181,8 @@ class GameApp {
       // Sample User Inputs
       const input = this.inputManager.sample(dt);
 
-      // Hold vehicle stationary in starting box before green flag
+      // Hold vehicle stationary in starting box before green flag while allowing throttle revving
       if (!this.isStarted) {
-        input.throttle = 0;
         input.brake = 1.0;
         input.handbrake = true;
       }

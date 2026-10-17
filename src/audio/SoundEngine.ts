@@ -38,6 +38,11 @@ export class SoundEngine {
   private curbOsc: OscillatorNode | null = null;
   private curbGain: GainNode | null = null;
 
+  // Straight-Cut Transmission Gearbox Whine
+  private gearWhineOsc: OscillatorNode | null = null;
+  private gearWhineHarmonic: OscillatorNode | null = null;
+  private gearWhineGain: GainNode | null = null;
+
   constructor() {}
 
   public init(): void {
@@ -55,6 +60,7 @@ export class SoundEngine {
       this.setupSharpTireSqueal();
       this.setupWindSound();
       this.setupCurbSound();
+      this.setupTransmissionWhine();
 
       this.isInitialized = true;
     } catch (e) {
@@ -246,6 +252,42 @@ export class SoundEngine {
     this.curbOsc.start();
   }
 
+  private setupTransmissionWhine(): void {
+    if (!this.ctx || !this.masterGain) return;
+
+    this.gearWhineOsc = this.ctx.createOscillator();
+    this.gearWhineOsc.type = 'sine';
+    this.gearWhineOsc.frequency.setValueAtTime(400, this.ctx.currentTime);
+
+    this.gearWhineHarmonic = this.ctx.createOscillator();
+    this.gearWhineHarmonic.type = 'triangle';
+    this.gearWhineHarmonic.frequency.setValueAtTime(800, this.ctx.currentTime);
+
+    const whineMix = this.ctx.createGain();
+    whineMix.gain.setValueAtTime(0.5, this.ctx.currentTime);
+    this.gearWhineOsc.connect(whineMix);
+
+    const harmGain = this.ctx.createGain();
+    harmGain.gain.setValueAtTime(0.35, this.ctx.currentTime);
+    this.gearWhineHarmonic.connect(harmGain);
+    harmGain.connect(whineMix);
+
+    const whineFilter = this.ctx.createBiquadFilter();
+    whineFilter.type = 'bandpass';
+    whineFilter.frequency.setValueAtTime(1600, this.ctx.currentTime);
+    whineFilter.Q.setValueAtTime(2.5, this.ctx.currentTime);
+
+    this.gearWhineGain = this.ctx.createGain();
+    this.gearWhineGain.gain.setValueAtTime(0, this.ctx.currentTime);
+
+    whineMix.connect(whineFilter);
+    whineFilter.connect(this.gearWhineGain);
+    this.gearWhineGain.connect(this.masterGain);
+
+    this.gearWhineOsc.start();
+    this.gearWhineHarmonic.start();
+  }
+
   /**
    * Update continuous audio state based on telemetry.
    */
@@ -340,6 +382,19 @@ export class SoundEngine {
         if (isFinite(curbFreq)) this.curbOsc.frequency.setTargetAtTime(curbFreq, now, 0.035);
       } else {
         this.curbGain.gain.setTargetAtTime(0, now, 0.05);
+      }
+    }
+
+    // 5. Straight-Cut Transmission Gearbox Whine (Racecar dog-box howl)
+    if (this.gearWhineGain && this.gearWhineOsc && this.gearWhineHarmonic) {
+      if (safeSpeed > 8) {
+        const whineFreq = 420 + safeSpeed * 9.8;
+        const whineVol = Math.min(0.22, (safeSpeed / 240) * 0.16 + safeThrottle * 0.06);
+        this.gearWhineOsc.frequency.setTargetAtTime(whineFreq, now, 0.035);
+        this.gearWhineHarmonic.frequency.setTargetAtTime(whineFreq * 1.98, now, 0.035);
+        this.gearWhineGain.gain.setTargetAtTime(whineVol, now, 0.04);
+      } else {
+        this.gearWhineGain.gain.setTargetAtTime(0, now, 0.06);
       }
     }
   }
@@ -458,6 +513,76 @@ export class SoundEngine {
     noiseGain.connect(this.masterGain!);
     noiseSource.start(now);
     noiseSource.stop(now + duration);
+  }
+
+  /**
+   * Synthesize Turbo blow-off valve (BOV) flutter when lifting off throttle under high boost/RPM.
+   */
+  public triggerBovFlutter(): void {
+    if (!this.isInitialized || !this.ctx || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const flutterCount = 4;
+    for (let f = 0; f < flutterCount; f++) {
+      const startTime = now + f * 0.055;
+      const duration = 0.05;
+      const bufferSize = Math.floor(this.ctx.sampleRate * duration);
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.22));
+      }
+      const noise = this.ctx.createBufferSource();
+      noise.buffer = buffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(2800 - f * 280, startTime);
+      filter.Q.setValueAtTime(4.5, startTime);
+
+      const gain = this.ctx.createGain();
+      const vol = 0.22 * Math.pow(0.70, f);
+      gain.gain.setValueAtTime(vol, startTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(this.masterGain!);
+
+      noise.start(startTime);
+      noise.stop(startTime + duration);
+    }
+  }
+
+  /**
+   * Synthesize F1 / FIA starting countdown light beeps.
+   */
+  public playCountdownBeep(isGo: boolean = false): void {
+    if (!this.isInitialized || !this.ctx || this.isMuted) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+
+    if (isGo) {
+      // High bright start chime
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(987.77, now); // B5 note
+      osc.frequency.setValueAtTime(1318.51, now + 0.12); // E6 note
+      gain.gain.setValueAtTime(0.55, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+      osc.connect(gain);
+      gain.connect(this.masterGain!);
+      osc.start(now);
+      osc.stop(now + 0.55);
+    } else {
+      // Staccato countdown red light beep
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now); // C5 note
+      gain.gain.setValueAtTime(0.42, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      osc.connect(gain);
+      gain.connect(this.masterGain!);
+      osc.start(now);
+      osc.stop(now + 0.16);
+    }
   }
 
   private makeDistortionCurve(amount: number = 20): Float32Array<ArrayBuffer> {

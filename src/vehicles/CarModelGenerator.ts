@@ -9,10 +9,14 @@ export interface CarModelInstance {
   wheelHubs: THREE.Group[];         // Inner rotation groups for axle spin
   steeringWheel: THREE.Mesh | null; // Cockpit steering wheel
   brakeLights: THREE.Mesh[];
+  brakeDiscs: THREE.Mesh[];         // 4 Brake rotor meshes for heat glow
   headlights: THREE.SpotLight[];
   exhaustPipes: THREE.Vector3[];
   setBrakeState: (isBraking: boolean) => void;
   setReverseState: (isReversing: boolean) => void;
+  updateBrakeHeat: (brakePressure: number, speedKmh: number, dt: number) => void;
+  setDrsState: (open: boolean) => void;
+  updateCockpitDash: (gear: number, speedKmh: number, rpm: number) => void;
 }
 
 /**
@@ -27,11 +31,18 @@ export class CarModelGenerator {
     const chassis = new THREE.Group();
     root.add(chassis);
 
-    // Common PBR Materials
+    // Common PBR Materials & Procedural Livery
+    const liveryTex = TextureGenerator.createCarLiveryTexture(
+      config.bodyColor,
+      config.accentColor,
+      config.raceNumber || '01'
+    );
+
     const bodyMat = new THREE.MeshStandardMaterial({
       color: config.bodyColor,
+      map: liveryTex,
       metalness: 0.85,
-      roughness: 0.18,
+      roughness: 0.20,
     });
 
     const accentMat = new THREE.MeshStandardMaterial({
@@ -173,12 +184,31 @@ export class CarModelGenerator {
 
     // --- 5. Cockpit Interior & Steering Wheel ---
     let steeringWheelMesh: THREE.Mesh | null = null;
-    const wheelRimGeo = new THREE.TorusGeometry(0.18, 0.025, 8, 24);
-    const wheelRimMat = new THREE.MeshStandardMaterial({ color: 0x222225, roughness: 0.6 });
+    const wheelRimGeo = new THREE.TorusGeometry(0.15, 0.022, 8, 24);
+    const wheelRimMat = new THREE.MeshStandardMaterial({ color: 0x1f1f22, roughness: 0.6 });
     steeringWheelMesh = new THREE.Mesh(wheelRimGeo, wheelRimMat);
-    steeringWheelMesh.position.set(-0.32, 0.72, 0.15); // Left-hand drive cockpit position
-    steeringWheelMesh.rotation.x = 0.35;
+    steeringWheelMesh.position.set(-0.32, 0.67, 0.25); // GT3 cockpit column position
+    steeringWheelMesh.rotation.x = -0.25;
     chassis.add(steeringWheelMesh);
+
+    // Center hub & OLED dash screen
+    const hubCapGeo = new THREE.CylinderGeometry(0.055, 0.055, 0.02, 16);
+    const hubCap = new THREE.Mesh(hubCapGeo, carbonMat);
+    hubCap.rotation.x = Math.PI / 2;
+    steeringWheelMesh.add(hubCap);
+
+    const dashCanvas = document.createElement('canvas');
+    dashCanvas.width = 128;
+    dashCanvas.height = 64;
+    const dashCtx = dashCanvas.getContext('2d')!;
+    const dashTex = new THREE.CanvasTexture(dashCanvas);
+    const dashScreenMat = new THREE.MeshBasicMaterial({ map: dashTex, side: THREE.DoubleSide });
+    const dashScreenGeo = new THREE.PlaneGeometry(0.10, 0.05);
+    const dashScreenMesh = new THREE.Mesh(dashScreenGeo, dashScreenMat);
+    dashScreenMesh.position.set(0, 0, -0.015);
+    dashScreenMesh.rotation.y = Math.PI;
+    dashScreenMesh.scale.x = -1;
+    steeringWheelMesh.add(dashScreenMesh);
 
     // --- 6. Dynamic Headlights & Taillights ---
     const brakeLights: THREE.Mesh[] = [];
@@ -270,17 +300,13 @@ export class CarModelGenerator {
     });
 
     const discTex = TextureGenerator.createBrakeDiscTexture();
-    const discMat = new THREE.MeshStandardMaterial({
-      map: discTex,
-      metalness: 0.85,
-      roughness: 0.3,
-    });
-
     const caliperMat = new THREE.MeshStandardMaterial({
       color: config.caliperColor ?? 0xffcc00, // Brembo racing yellow
       roughness: 0.3,
       metalness: 0.4,
     });
+
+    const brakeDiscs: THREE.Mesh[] = [];
 
     for (let i = 0; i < 4; i++) {
       const isLeft = i === 0 || i === 2;
@@ -312,12 +338,20 @@ export class CarModelGenerator {
       rimMesh.rotation.z = Math.PI / 2;
       hubGroup.add(rimMesh);
 
-      // Brake Rotor Disc (mounted to hub)
+      // Brake Rotor Disc (mounted to hub with independent material for heat glow)
       const discGeo = new THREE.CylinderGeometry(tireRadius * 0.62, tireRadius * 0.62, 0.03, 16);
-      const discMesh = new THREE.Mesh(discGeo, discMat);
+      const wheelDiscMat = new THREE.MeshStandardMaterial({
+        map: discTex,
+        metalness: 0.85,
+        roughness: 0.3,
+        emissive: new THREE.Color(0x000000),
+        emissiveIntensity: 0,
+      });
+      const discMesh = new THREE.Mesh(discGeo, wheelDiscMat);
       discMesh.rotation.z = Math.PI / 2;
       discMesh.position.x = isLeft ? 0.04 : -0.04;
       hubGroup.add(discMesh);
+      brakeDiscs.push(discMesh);
 
       // Brake Caliper (static relative to steering, doesn't spin with axle)
       const caliperGeo = new THREE.BoxGeometry(0.06, 0.12, 0.18);
@@ -344,6 +378,72 @@ export class CarModelGenerator {
       // Reverse indicator can modulate rear lights or white accents
     };
 
+    // Realistic brake rotor heating & cooling simulation
+    let brakeTemp = 25; // ambient temperature in °C
+    const updateBrakeHeat = (brakePressure: number, speedKmh: number, dt: number): void => {
+      if (brakePressure > 0.05 && speedKmh > 8) {
+        brakeTemp += brakePressure * (speedKmh / 200) * dt * 550;
+      }
+      const coolRate = 0.5 + (speedKmh / 160) * 0.9;
+      brakeTemp = Math.max(25, brakeTemp - (brakeTemp - 25) * dt * coolRate * 0.28);
+      brakeTemp = Math.min(1100, brakeTemp);
+
+      // When brakeTemp > 240°C, the rotors visibly glow red-hot to fiery orange
+      if (brakeTemp > 240) {
+        const factor = Math.min(1.0, (brakeTemp - 240) / 600);
+        const r = Math.min(1.0, factor * 1.5);
+        const g = Math.max(0, (factor - 0.25) * 0.65);
+        const b = Math.max(0, (factor - 0.65) * 0.35);
+        for (const disc of brakeDiscs) {
+          const mat = disc.material as THREE.MeshStandardMaterial;
+          mat.emissive.setRGB(r, g, b);
+          mat.emissiveIntensity = factor * 3.8;
+        }
+      } else {
+        for (const disc of brakeDiscs) {
+          const mat = disc.material as THREE.MeshStandardMaterial;
+          mat.emissive.setHex(0x000000);
+          mat.emissiveIntensity = 0;
+        }
+      }
+    };
+
+    const setDrsState = (open: boolean): void => {
+      wing.rotation.x = open ? -0.04 : 0.08;
+    };
+
+    const updateCockpitDash = (gear: number, speedKmh: number, rpm: number): void => {
+      dashCtx.fillStyle = '#060913';
+      dashCtx.fillRect(0, 0, 128, 64);
+
+      // Top multi-color LED RPM bar
+      const maxRpm = 8500;
+      const rpmRatio = Math.min(1.0, Math.max(0, rpm / maxRpm));
+      const barWidth = Math.floor(rpmRatio * 120);
+      dashCtx.fillStyle = rpm > 7800 ? '#ff1111' : (rpm > 6500 ? '#ffaa00' : '#00e5ff');
+      dashCtx.fillRect(4, 4, barWidth, 6);
+
+      // Large Gear Indicator
+      dashCtx.fillStyle = '#ffcc00';
+      dashCtx.font = '900 36px "Consolas", monospace';
+      dashCtx.textAlign = 'center';
+      dashCtx.textBaseline = 'middle';
+      const gearText = gear === -1 ? 'R' : (gear === 0 ? 'N' : gear.toString());
+      dashCtx.fillText(gearText, 40, 38);
+
+      // Digital Speed km/h
+      dashCtx.fillStyle = '#ffffff';
+      dashCtx.font = '700 16px "Consolas", monospace';
+      dashCtx.textAlign = 'right';
+      dashCtx.fillText(`${Math.round(speedKmh)}`, 122, 32);
+
+      dashCtx.fillStyle = '#64748b';
+      dashCtx.font = '600 10px sans-serif';
+      dashCtx.fillText('KM/H', 122, 48);
+
+      dashTex.needsUpdate = true;
+    };
+
     return {
       rootGroup: root,
       chassisMesh: chassis,
@@ -351,10 +451,14 @@ export class CarModelGenerator {
       wheelHubs,
       steeringWheel: steeringWheelMesh,
       brakeLights,
+      brakeDiscs,
       headlights,
       exhaustPipes,
       setBrakeState,
       setReverseState,
+      updateBrakeHeat,
+      setDrsState,
+      updateCockpitDash,
     };
   }
 }

@@ -70,6 +70,9 @@ export class SkyboxGenerator {
         ctx.fill();
       }
 
+      // Distant rolling mountain range
+      this.drawMountains(ctx, w, h, 'rgba(75, 120, 165, 0.50)', 'rgba(40, 75, 45, 0.70)');
+
     } else if (mode === 'sunset') {
       // Golden hour / fiery twilight
       const grad = ctx.createLinearGradient(0, 0, 0, h);
@@ -89,6 +92,9 @@ export class SkyboxGenerator {
       sunGrad.addColorStop(1, 'rgba(200, 50, 20, 0)');
       ctx.fillStyle = sunGrad;
       ctx.fillRect(0, 0, w, h);
+
+      // Sunset mountain silhouettes
+      this.drawMountains(ctx, w, h, 'rgba(65, 25, 55, 0.80)', 'rgba(38, 16, 22, 0.95)');
 
     } else {
       // Night Mode: Dark navy starry night
@@ -123,8 +129,42 @@ export class SkyboxGenerator {
       ctx.beginPath();
       ctx.arc(w * 0.7 + 10, h * 0.25 - 4, 22, 0, Math.PI * 2);
       ctx.fill();
+
+      // Night dark mountain ridges
+      this.drawMountains(ctx, w, h, 'rgba(8, 14, 30, 0.85)', 'rgba(3, 5, 12, 0.96)');
     }
 
     this.skyTexture.needsUpdate = true;
+  }
+
+  /**
+   * Procedural layered mountain ridge line along the horizon.
+   */
+  private drawMountains(ctx: CanvasRenderingContext2D, w: number, h: number, col1: string, col2: string): void {
+    // Layer 1: High distance alpine peaks
+    ctx.fillStyle = col1;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.80);
+    for (let x = 0; x <= w; x += 16) {
+      const peakY = h * 0.72 + Math.sin(x * 0.009) * 26 + Math.cos(x * 0.024) * 16 + Math.sin(x * 0.06) * 7;
+      ctx.lineTo(x, peakY);
+    }
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
+
+    // Layer 2: Near foothills
+    ctx.fillStyle = col2;
+    ctx.beginPath();
+    ctx.moveTo(0, h * 0.84);
+    for (let x = 0; x <= w; x += 14) {
+      const hillY = h * 0.77 + Math.sin(x * 0.015 + 1.2) * 15 + Math.cos(x * 0.038) * 9;
+      ctx.lineTo(x, hillY);
+    }
+    ctx.lineTo(w, h);
+    ctx.lineTo(0, h);
+    ctx.closePath();
+    ctx.fill();
   }
 }
